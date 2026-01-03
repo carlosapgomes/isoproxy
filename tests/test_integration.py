@@ -94,12 +94,13 @@ def test_get_root_returns_404(client):
 def test_response_matches_upstream_verbatim(
     client, valid_request_dict, httpx_mock: HTTPXMock
 ):
-    """Test that response matches upstream verbatim (including error responses)."""
+    """Test that error responses are normalized to prevent info leakage."""
+    # Upstream returns provider-specific error details
     upstream_error = {
         "type": "error",
         "error": {
             "type": "rate_limit_error",
-            "message": "Rate limit exceeded",
+            "message": "Rate limit: 50 requests per minute, retry after 30s",
         },
     }
 
@@ -112,9 +113,12 @@ def test_response_matches_upstream_verbatim(
 
     response = client.post("/v1/messages", json=valid_request_dict)
 
-    # Status code and body should match upstream exactly
+    # Status code preserved, but error details are normalized
     assert response.status_code == 429
-    assert response.json() == upstream_error
+    assert response.json() == {
+        "type": "error",
+        "error": {"type": "rate_limited", "message": "Rate limit exceeded"},
+    }
 
 
 def test_missing_messages_field_returns_422(client):

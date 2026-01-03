@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 
 from isoproxy.config import ProxyConfig
-from isoproxy.errors import ProxyUpstreamError
+from isoproxy.errors import ProxyUpstreamError, normalize_upstream_error
 
 logger = logging.getLogger("isoproxy")
 
@@ -46,9 +46,14 @@ async def forward_to_upstream(payload: dict, config: ProxyConfig) -> tuple[int, 
                 headers=headers,
             )
 
-            # Return response verbatim (don't validate or modify)
-            # The upstream might return 4xx/5xx which we pass through
-            return response.status_code, response.json()
+            # For successful responses (2xx), return verbatim
+            if 200 <= response.status_code < 300:
+                return response.status_code, response.json()
+
+            # For error responses (4xx/5xx), normalize to prevent info leakage
+            # This hides provider-specific error details while preserving semantic signal
+            logger.warning(f"Upstream returned error status: {response.status_code}")
+            return normalize_upstream_error(response.status_code)
 
     except httpx.TimeoutException as e:
         logger.error(f"Upstream timeout after {config.timeout}s: {type(e).__name__}")

@@ -27,49 +27,116 @@ async def test_successful_upstream_request_returns_verbatim(
 
 
 @pytest.mark.asyncio
-async def test_upstream_4xx_error_returned_verbatim(
+async def test_upstream_400_error_normalized(
     mock_config, valid_request_dict, httpx_mock: HTTPXMock
 ):
-    """Test that upstream 4xx errors are returned verbatim."""
-    error_response = {
+    """Test that upstream 400 errors are normalized to prevent info leakage."""
+    # Upstream returns provider-specific error
+    upstream_error = {
         "type": "error",
-        "error": {"type": "invalid_request_error", "message": "Invalid model"},
+        "error": {
+            "type": "invalid_request_error",
+            "message": "Anthropic-specific error details",
+        },
     }
 
     httpx_mock.add_response(
         url="https://api.test.com/v1/messages",
         method="POST",
-        json=error_response,
+        json=upstream_error,
         status_code=400,
     )
 
     status_code, response_body = await forward_to_upstream(valid_request_dict, mock_config)
 
+    # Status code preserved, but error details are normalized
     assert status_code == 400
-    assert response_body == error_response
+    assert response_body == {
+        "type": "error",
+        "error": {
+            "type": "invalid_request",
+            "message": "The request was malformed or missing required parameters",
+        },
+    }
 
 
 @pytest.mark.asyncio
-async def test_upstream_5xx_error_returned_verbatim(
+async def test_upstream_401_error_normalized(
     mock_config, valid_request_dict, httpx_mock: HTTPXMock
 ):
-    """Test that upstream 5xx errors are returned verbatim."""
-    error_response = {
+    """Test that upstream 401 errors are normalized."""
+    httpx_mock.add_response(
+        url="https://api.test.com/v1/messages",
+        method="POST",
+        json={"error": "Invalid API key"},
+        status_code=401,
+    )
+
+    status_code, response_body = await forward_to_upstream(valid_request_dict, mock_config)
+
+    assert status_code == 401
+    assert response_body == {
         "type": "error",
-        "error": {"type": "api_error", "message": "Internal server error"},
+        "error": {"type": "authentication_error", "message": "Authentication failed"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_upstream_429_error_normalized(
+    mock_config, valid_request_dict, httpx_mock: HTTPXMock
+):
+    """Test that upstream 429 errors are normalized to hide rate limit details."""
+    # Upstream might return detailed rate limit info
+    upstream_error = {
+        "error": {
+            "type": "rate_limit_error",
+            "message": "Rate limit: 50 requests per minute, retry after 30s",
+        }
     }
 
     httpx_mock.add_response(
         url="https://api.test.com/v1/messages",
         method="POST",
-        json=error_response,
+        json=upstream_error,
+        status_code=429,
+    )
+
+    status_code, response_body = await forward_to_upstream(valid_request_dict, mock_config)
+
+    assert status_code == 429
+    assert response_body == {
+        "type": "error",
+        "error": {"type": "rate_limited", "message": "Rate limit exceeded"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_upstream_500_error_normalized(
+    mock_config, valid_request_dict, httpx_mock: HTTPXMock
+):
+    """Test that upstream 500 errors are normalized."""
+    upstream_error = {
+        "type": "error",
+        "error": {"type": "api_error", "message": "Internal server error details"},
+    }
+
+    httpx_mock.add_response(
+        url="https://api.test.com/v1/messages",
+        method="POST",
+        json=upstream_error,
         status_code=500,
     )
 
     status_code, response_body = await forward_to_upstream(valid_request_dict, mock_config)
 
     assert status_code == 500
-    assert response_body == error_response
+    assert response_body == {
+        "type": "error",
+        "error": {
+            "type": "upstream_error",
+            "message": "The provider encountered an internal error",
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -141,3 +208,79 @@ async def test_correct_url_called(mock_config, valid_request_dict, httpx_mock: H
 
     request = httpx_mock.get_request()
     assert str(request.url) == "https://api.test.com/v1/messages"
+
+
+@pytest.mark.asyncio
+async def test_unknown_4xx_error_normalized(
+    mock_config, valid_request_dict, httpx_mock: HTTPXMock
+):
+    """Test that unknown 4xx errors get generic client error message."""
+    httpx_mock.add_response(
+        url="https://api.test.com/v1/messages",
+        method="POST",
+        json={"error": "Some provider-specific 418 error"},
+        status_code=418,
+    )
+
+    status_code, response_body = await forward_to_upstream(valid_request_dict, mock_config)
+
+    # Status code preserved, but message is generic
+    assert status_code == 418
+    assert response_body == {
+        "type": "error",
+        "error": {"type": "client_error", "message": "The request could not be processed"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_unknown_5xx_error_normalized(
+    mock_config, valid_request_dict, httpx_mock: HTTPXMock
+):
+    """Test that unknown 5xx errors get generic upstream error message."""
+    httpx_mock.add_response(
+        url="https://api.test.com/v1/messages",
+        method="POST",
+        json={"error": "Some provider-specific 599 error"},
+        status_code=599,
+    )
+
+    status_code, response_body = await forward_to_upstream(valid_request_dict, mock_config)
+
+    # Status code preserved, but message is generic
+    assert status_code == 599
+    assert response_body == {
+        "type": "error",
+        "error": {"type": "upstream_error", "message": "The provider encountered an error"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_multiple_mapped_errors(
+    mock_config, valid_request_dict, httpx_mock: HTTPXMock
+):
+    """Test that all mapped error codes return correct normalized responses."""
+    test_cases = [
+        (403, "permission_denied", "Access to the requested resource is forbidden"),
+        (404, "not_found", "The requested resource was not found"),
+        (502, "upstream_error", "The provider is temporarily unavailable"),
+        (503, "upstream_error", "The provider is temporarily unavailable"),
+        (529, "upstream_error", "The provider is temporarily overloaded"),
+    ]
+
+    for status, error_type, message in test_cases:
+        httpx_mock.add_response(
+            url="https://api.test.com/v1/messages",
+            method="POST",
+            json={"original": "error"},
+            status_code=status,
+        )
+
+        result_status, result_body = await forward_to_upstream(
+            valid_request_dict, mock_config
+        )
+
+        assert result_status == status
+        assert result_body == {
+            "type": "error",
+            "error": {"type": error_type, "message": message},
+        }
