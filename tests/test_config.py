@@ -23,18 +23,20 @@ def test_valid_config_loads(monkeypatch):
 
 def test_missing_upstream_base_raises_error(monkeypatch):
     """Test that missing PROXY_UPSTREAM_BASE raises error."""
+    monkeypatch.delenv("PROXY_UPSTREAM_BASE", raising=False)
     monkeypatch.setenv("PROXY_API_KEY", "sk-ant-test123")
 
     with pytest.raises(ValidationError):
-        ProxyConfig()
+        ProxyConfig(_env_file=None)
 
 
 def test_missing_api_key_raises_error(monkeypatch):
     """Test that missing PROXY_API_KEY raises error."""
     monkeypatch.setenv("PROXY_UPSTREAM_BASE", "https://api.anthropic.com")
+    monkeypatch.delenv("PROXY_API_KEY", raising=False)
 
     with pytest.raises(ValidationError):
-        ProxyConfig()
+        ProxyConfig(_env_file=None)
 
 
 def test_invalid_upstream_url_raises_error(monkeypatch):
