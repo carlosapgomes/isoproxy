@@ -114,22 +114,19 @@ ruff format src/ tests/
 
 ## Production Deployment
 
-### Using systemd
-
 1. Create a dedicated user:
 
 ```bash
 sudo useradd -r -s /bin/false isoproxy
 ```
 
-2. Install the proxy:
+2. Clone and install the proxy:
 
 ```bash
-sudo mkdir -p /opt/isoproxy
-sudo cp -r . /opt/isoproxy/
+sudo -u isoproxy git clone https://github.com/carlosapgomes/isoproxy.git /opt/isoproxy
 cd /opt/isoproxy
-sudo uv venv
-sudo uv pip install .
+sudo -u isoproxy uv venv
+sudo -u isoproxy uv pip install .
 ```
 
 3. Create configuration:
@@ -156,6 +153,22 @@ sudo systemctl start isoproxy
 ```bash
 sudo systemctl status isoproxy
 sudo journalctl -u isoproxy -f
+```
+
+6. (Optional) Configure network restrictions:
+
+```bash
+# Get isoproxy user ID
+id -u isoproxy
+
+# Edit the config and update LLMPROXY_UID with the actual UID
+sudo nano deployment/nftables-llmproxy.conf
+
+# Deploy the nftables rules
+sudo mkdir -p /etc/nftables.d
+sudo cp deployment/nftables-llmproxy.conf /etc/nftables.d/llmproxy.conf
+echo 'include "/etc/nftables.d/llmproxy.conf"' | sudo tee -a /etc/nftables.conf
+sudo nft -f /etc/nftables.conf
 ```
 
 ## Unix Socket Configuration
@@ -233,178 +246,9 @@ sudo systemctl status isoproxy-socket
 
 The socket will be available at `/run/isoproxy/isoproxy.sock` with proper permissions automatically managed by systemd's `RuntimeDirectory` directive.
 
-## Running in a Segregated Environment
+## Security Notes
 
-**This proxy must not run inside the same sandbox as the agent (Claude Code).**
-It is designed to run outside the sandbox and act as the only controlled egress point.
-
-### 1. Execution Model (Important)
-
-**Claude Code (agent) runs:**
-- Inside Firejail (or equivalent)
-- With no internet access
-- With `net lo` only
-
-**isoproxy runs:**
-- Outside Firejail
-- As a separate UNIX user
-- With restricted outbound internet access
-- Bound to `127.0.0.1` only
-
-**This separation is mandatory.**
-
-### 2. Create a Dedicated User (Host)
-
-```bash
-sudo useradd \
-  --system \
-  --no-create-home \
-  --shell /usr/sbin/nologin \
-  isoproxy
-```
-
-This user will own and run the proxy.
-
-**Note**: The systemd service file references `llmproxy` user for historical reasons, but should be updated to use `isoproxy` for consistency.
-
-### 3. Install and Configure the Proxy
-
-#### 3.1 Clone the repository
-
-```bash
-sudo -u isoproxy git clone https://github.com/carlosapgomes/isoproxy.git /opt/isoproxy
-cd /opt/isoproxy
-```
-
-#### 3.2 Create a Python environment
-
-```bash
-sudo -u isoproxy python3 -m venv /opt/isoproxy/venv
-sudo -u isoproxy /opt/isoproxy/venv/bin/pip install -e .
-```
-
-(Adjust if you are using `uv` or another tool.)
-
-### 4. Configure Environment Variables
-
-Create a file readable only by `isoproxy`:
-
-```bash
-sudo -u isoproxy nano /opt/isoproxy/env
-```
-
-**Recommended**: Use the `/etc/isoproxy/config.env` location for better security segregation:
-
-```bash
-sudo mkdir -p /etc/isoproxy
-sudo -u isoproxy nano /etc/isoproxy/config.env
-```
-
-Example:
-
-```bash
-PROXY_UPSTREAM_BASE=https://api.anthropic.com
-PROXY_API_KEY=sk-ant-xxxxxxxx
-PROXY_DEFAULT_MODEL=claude-3-5-sonnet-20241022
-PROXY_TIMEOUT=30
-```
-
-Set permissions:
-
-```bash
-sudo chmod 600 /etc/isoproxy/config.env
-sudo chown isoproxy:isoproxy /etc/isoproxy/config.env
-```
-
-### 5. Start the Proxy (Manual)
-
-```bash
-sudo -u isoproxy \
-  env $(cat /etc/isoproxy/config.env | xargs) \
-  /opt/isoproxy/venv/bin/uvicorn isoproxy.main:app \
-    --host 127.0.0.1 \
-    --port 9000
-```
-
-You should now have `http://127.0.0.1:9000/v1/messages` available locally.
-
-### 6. Firewall (Strongly Recommended)
-
-Restrict outbound access for `isoproxy` using the included nftables configuration:
-
-```bash
-# Get isoproxy user ID
-id -u isoproxy
-
-# Edit the config and update LLMPROXY_UID with the actual UID
-sudo nano deployment/nftables-llmproxy.conf
-
-# Deploy the nftables rules
-sudo mkdir -p /etc/nftables.d
-sudo cp deployment/nftables-llmproxy.conf /etc/nftables.d/llmproxy.conf
-echo 'include "/etc/nftables.d/llmproxy.conf"' | sudo tee -a /etc/nftables.conf
-
-# Load the rules
-sudo nft -f /etc/nftables.conf
-
-# Verify
-sudo nft list ruleset | grep llmproxy
-```
-
-This restricts `isoproxy` to:
-- ✅ Loopback (for binding to 127.0.0.1:9000)
-- ✅ DNS (for resolving upstream hostname)
-- ✅ HTTPS (for connecting to upstream API)
-- ❌ Everything else is logged and blocked
-
-Monitor blocked attempts:
-```bash
-sudo journalctl -kf | grep llmproxy-blocked
-```
-
-### 7. Configure Claude Code (Sandbox)
-
-Inside the Firejail sandbox:
-
-```bash
-export ANTHROPIC_API_BASE=http://127.0.0.1:9000
-export ANTHROPIC_API_KEY=dummy
-```
-
-Then run:
-
-```bash
-claude
-```
-
-Claude Code will connect only to the local proxy.
-
-### 8. Verify Isolation
-
-**Inside the sandbox:**
-
-```bash
-curl http://127.0.0.1:9000/v1/messages  # should connect to proxy
-curl https://api.anthropic.com          # must FAIL
-```
-
-**Outside the sandbox:**
-
-```bash
-curl http://127.0.0.1:9000/v1/messages  # should work
-```
-
-### 9. What Not To Do (Explicit)
-
-- ❌ Do not run the proxy inside Firejail
-- ❌ Do not bind to `0.0.0.0`
-- ❌ Do not give the agent internet access
-- ❌ Do not store API keys in the sandbox
-- ❌ Do not log request/response bodies
-
-### 10. Why This Matters
-
-This proxy exists to move trust and secrets outside the agent while still allowing Claude Code to function. Running it outside the sandbox and restricting it at the OS level ensures that even if the agent is compromised, it cannot access the internet, API keys, or other system resources directly.
+**Important**: This proxy must run outside any sandbox environment (like Firejail) that contains Claude Code. It should run as a dedicated user with restricted permissions and limited network access.
 
 ## Security Considerations
 
