@@ -15,7 +15,7 @@ WorkingDirectory=/opt/isoproxy
 EnvironmentFile=/etc/isoproxy/config.env
 
 # Start the proxy server
-ExecStart=/opt/isoproxy/venv/bin/uvicorn isoproxy.main:app \
+ExecStart=/opt/isoproxy/.venv/bin/uvicorn isoproxy.main:app \
   --host 127.0.0.1 \
   --port 9000 \
   --workers 1

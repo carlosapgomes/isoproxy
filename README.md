@@ -94,7 +94,11 @@ Claude Code will now use the proxy to access the upstream API.
 
 ```bash
 # Install development dependencies
+# With uv (if available):
 uv pip install -e ".[dev]"
+
+# Or with pip:
+pip install -e ".[dev]"
 
 # Run all tests
 pytest
@@ -132,8 +136,8 @@ sudo chown isoproxy:isoproxy /opt/isoproxy
 ```bash
 sudo -u isoproxy git clone https://github.com/carlosapgomes/isoproxy.git /opt/isoproxy
 cd /opt/isoproxy
-sudo -u isoproxy uv venv
-sudo -u isoproxy uv pip install .
+sudo -u isoproxy python3 -m venv .venv
+sudo -u isoproxy .venv/bin/pip install .
 ```
 
 4. Create configuration:
@@ -197,7 +201,7 @@ sudo chmod 755 /run/isoproxy
 # Start with Unix socket
 sudo -u isoproxy \
   env $(cat /etc/isoproxy/config.env | xargs) \
-  /opt/isoproxy/venv/bin/uvicorn isoproxy.main:app \
+  /opt/isoproxy/.venv/bin/uvicorn isoproxy.main:app \
     --uds /run/isoproxy/isoproxy.sock \
     --workers 1
 ```
