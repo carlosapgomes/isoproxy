@@ -120,7 +120,14 @@ ruff format src/ tests/
 sudo useradd -r -s /bin/false isoproxy
 ```
 
-2. Clone and install the proxy:
+2. Create installation directory:
+
+```bash
+sudo mkdir -p /opt/isoproxy
+sudo chown isoproxy:isoproxy /opt/isoproxy
+```
+
+3. Clone and install the proxy:
 
 ```bash
 sudo -u isoproxy git clone https://github.com/carlosapgomes/isoproxy.git /opt/isoproxy
@@ -129,7 +136,7 @@ sudo -u isoproxy uv venv
 sudo -u isoproxy uv pip install .
 ```
 
-3. Create configuration:
+4. Create configuration:
 
 ```bash
 sudo mkdir -p /etc/isoproxy
@@ -139,7 +146,7 @@ sudo chown -R isoproxy:isoproxy /etc/isoproxy
 sudo chmod 600 /etc/isoproxy/config.env
 ```
 
-4. Install and start service:
+5. Install and start service:
 
 ```bash
 sudo cp deployment/isoproxy.service /etc/systemd/system/
@@ -148,14 +155,14 @@ sudo systemctl enable isoproxy
 sudo systemctl start isoproxy
 ```
 
-5. Check status:
+6. Check status:
 
 ```bash
 sudo systemctl status isoproxy
 sudo journalctl -u isoproxy -f
 ```
 
-6. (Optional) Configure network restrictions:
+7. (Optional) Configure network restrictions:
 
 ```bash
 # Get isoproxy user ID
