@@ -19,38 +19,12 @@ ExecStart=/opt/isoproxy/.venv/bin/uvicorn --app-dir /opt/isoproxy isoproxy.main:
 Restart=on-failure
 RestartSec=3
 
-# Security hardening
+# Basic security hardening
 NoNewPrivileges=yes
 PrivateTmp=yes
-PrivateDevices=true
-ProtectSystem=full
-ProtectHome=yes
-ProtectClock=true
-ProtectHostname=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectKernelLogs=true
-ProtectControlGroups=true
-RestrictNamespaces=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
-LockPersonality=true
-MemoryDenyWriteExecute=true
-
-# Network restrictions (Unix socket doesn't need network access for binding)
-RestrictAddressFamilies=AF_INET AF_INET6
-
-# System call filtering
-SystemCallFilter=@system-service @network-io
-SystemCallErrorNumber=EPERM
 
 # Resource limits
 LimitNOFILE=1024
-CPUQuota=50%
-MemoryMax=512M
-
-# Additional paths for socket and logs
-ReadWritePaths=/opt/isoproxy /var/log/isoproxy
 
 [Install]
 WantedBy=multi-user.target

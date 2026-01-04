@@ -5,12 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=llmproxy
-Group=llmproxy
+User=isoproxy
+Group=isoproxy
 WorkingDirectory=/opt/isoproxy
 
 # Load environment variables from secure config file
-# Create with: sudo -u llmproxy nano /etc/isoproxy/config.env
+# Create with: sudo -u isoproxy nano /etc/isoproxy/config.env
 # Secure with: sudo chmod 600 /etc/isoproxy/config.env
 EnvironmentFile=/etc/isoproxy/config.env
 
