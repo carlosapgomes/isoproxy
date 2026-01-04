@@ -119,7 +119,7 @@ ruff format src/ tests/
 1. Create a dedicated user:
 
 ```bash
-sudo useradd -r -s /bin/false llmproxy
+sudo useradd -r -s /bin/false isoproxy
 ```
 
 2. Install the proxy:
@@ -138,7 +138,7 @@ sudo uv pip install .
 sudo mkdir -p /etc/isoproxy
 sudo cp deployment/.env.example /etc/isoproxy/config.env
 sudo nano /etc/isoproxy/config.env  # Edit configuration
-sudo chown -R llmproxy:llmproxy /etc/isoproxy
+sudo chown -R isoproxy:isoproxy /etc/isoproxy
 sudo chmod 600 /etc/isoproxy/config.env
 ```
 
@@ -157,6 +157,81 @@ sudo systemctl start isoproxy
 sudo systemctl status isoproxy
 sudo journalctl -u isoproxy -f
 ```
+
+## Unix Socket Configuration
+
+For enhanced security or integration with other services, isoproxy can bind to Unix domain sockets instead of TCP ports. This provides:
+
+- **Filesystem-level access control**: Socket permissions control access
+- **Reduced attack surface**: No network exposure, even locally
+- **Integration capabilities**: Easy connection from other services or proxies
+
+### Basic Unix Socket Setup
+
+```bash
+# Create socket directory with proper permissions
+sudo mkdir -p /run/isoproxy
+sudo chown isoproxy:isoproxy /run/isoproxy
+sudo chmod 755 /run/isoproxy
+
+# Start with Unix socket
+sudo -u isoproxy \
+  env $(cat /etc/isoproxy/config.env | xargs) \
+  /opt/isoproxy/venv/bin/uvicorn isoproxy.main:app \
+    --uds /run/isoproxy/isoproxy.sock \
+    --workers 1
+```
+
+### Configure Client Access
+
+Access via curl with Unix socket:
+```bash
+curl --unix-socket /run/isoproxy/isoproxy.sock \
+     -X POST \
+     -H "Content-Type: application/json" \
+     -d '{"messages": [...]}' \
+     http://localhost/v1/messages
+```
+
+### Integration with HTTP Proxy
+
+Use with nginx, Apache, or other HTTP proxies:
+
+**nginx example:**
+```nginx
+upstream isoproxy {
+    server unix:/run/isoproxy/isoproxy.sock;
+}
+
+server {
+    listen 127.0.0.1:9000;
+    
+    location /v1/messages {
+        proxy_pass http://isoproxy;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+### systemd Service for Unix Socket
+
+A dedicated service file is provided for Unix socket deployment:
+
+```bash
+# Install the Unix socket service
+sudo cp deployment/isoproxy-socket.service /etc/systemd/system/
+
+# Update the service file to use 'isoproxy' user (if needed)
+sudo systemctl daemon-reload
+sudo systemctl enable isoproxy-socket
+sudo systemctl start isoproxy-socket
+
+# Check status
+sudo systemctl status isoproxy-socket
+```
+
+The socket will be available at `/run/isoproxy/isoproxy.sock` with proper permissions automatically managed by systemd's `RuntimeDirectory` directive.
 
 ## Running in a Segregated Environment
 
@@ -185,35 +260,44 @@ sudo useradd \
   --system \
   --no-create-home \
   --shell /usr/sbin/nologin \
-  llmproxy
+  isoproxy
 ```
 
 This user will own and run the proxy.
+
+**Note**: The systemd service file references `llmproxy` user for historical reasons, but should be updated to use `isoproxy` for consistency.
 
 ### 3. Install and Configure the Proxy
 
 #### 3.1 Clone the repository
 
 ```bash
-sudo -u llmproxy git clone https://github.com/carlosapgomes/isoproxy.git /opt/isoproxy
+sudo -u isoproxy git clone https://github.com/carlosapgomes/isoproxy.git /opt/isoproxy
 cd /opt/isoproxy
 ```
 
 #### 3.2 Create a Python environment
 
 ```bash
-sudo -u llmproxy python3 -m venv /opt/isoproxy/venv
-sudo -u llmproxy /opt/isoproxy/venv/bin/pip install -e .
+sudo -u isoproxy python3 -m venv /opt/isoproxy/venv
+sudo -u isoproxy /opt/isoproxy/venv/bin/pip install -e .
 ```
 
 (Adjust if you are using `uv` or another tool.)
 
 ### 4. Configure Environment Variables
 
-Create a file readable only by `llmproxy`:
+Create a file readable only by `isoproxy`:
 
 ```bash
-sudo -u llmproxy nano /opt/isoproxy/env
+sudo -u isoproxy nano /opt/isoproxy/env
+```
+
+**Recommended**: Use the `/etc/isoproxy/config.env` location for better security segregation:
+
+```bash
+sudo mkdir -p /etc/isoproxy
+sudo -u isoproxy nano /etc/isoproxy/config.env
 ```
 
 Example:
@@ -228,15 +312,15 @@ PROXY_TIMEOUT=30
 Set permissions:
 
 ```bash
-sudo chmod 600 /opt/isoproxy/env
-sudo chown llmproxy:llmproxy /opt/isoproxy/env
+sudo chmod 600 /etc/isoproxy/config.env
+sudo chown isoproxy:isoproxy /etc/isoproxy/config.env
 ```
 
 ### 5. Start the Proxy (Manual)
 
 ```bash
-sudo -u llmproxy \
-  env $(cat /opt/isoproxy/env | xargs) \
+sudo -u isoproxy \
+  env $(cat /etc/isoproxy/config.env | xargs) \
   /opt/isoproxy/venv/bin/uvicorn isoproxy.main:app \
     --host 127.0.0.1 \
     --port 9000
@@ -246,11 +330,11 @@ You should now have `http://127.0.0.1:9000/v1/messages` available locally.
 
 ### 6. Firewall (Strongly Recommended)
 
-Restrict outbound access for `llmproxy` using the included nftables configuration:
+Restrict outbound access for `isoproxy` using the included nftables configuration:
 
 ```bash
-# Get llmproxy user ID
-id -u llmproxy
+# Get isoproxy user ID
+id -u isoproxy
 
 # Edit the config and update LLMPROXY_UID with the actual UID
 sudo nano deployment/nftables-llmproxy.conf
@@ -267,7 +351,7 @@ sudo nft -f /etc/nftables.conf
 sudo nft list ruleset | grep llmproxy
 ```
 
-This restricts `llmproxy` to:
+This restricts `isoproxy` to:
 - ✅ Loopback (for binding to 127.0.0.1:9000)
 - ✅ DNS (for resolving upstream hostname)
 - ✅ HTTPS (for connecting to upstream API)
@@ -344,6 +428,7 @@ This proxy exists to move trust and secrets outside the agent while still allowi
   - Logs all blocked connection attempts for monitoring
   - Prevents exfiltration via HTTP, FTP, SSH, or other protocols
 - **API key isolation**: API keys are loaded from a secure config file (`/etc/isoproxy/config.env`) with 600 permissions, never exposed in process environment or systemd metadata
+- **Unix socket support**: Can bind to Unix domain sockets for integration with other services or additional security isolation
 - **Segregated execution**: Designed to run as a dedicated unprivileged user outside sandboxed environments
 
 ## Architecture
