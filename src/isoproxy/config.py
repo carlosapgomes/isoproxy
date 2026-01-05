@@ -1,11 +1,17 @@
-"""Configuration management for isoproxy."""
+"""Configuration management for isoproxy safe pass-through proxy."""
 
-from pydantic import Field, HttpUrl, field_validator
+import os
+from typing import Dict, Any
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProxyConfig(BaseSettings):
-    """Configuration for the proxy server loaded from environment variables."""
+    """Configuration for the safe pass-through proxy server.
+    
+    This configuration enforces strict boundaries while allowing transparent
+    protocol forwarding to Anthropic-compatible providers.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="PROXY_",
@@ -14,28 +20,42 @@ class ProxyConfig(BaseSettings):
         extra="ignore",
     )
 
-    # Required configuration
-    upstream_base: str = Field(
-        ...,
-        description="Base URL of the upstream Anthropic-compatible API",
+    # Provider Configuration
+    providers: Dict[str, Dict[str, Any]] = Field(
+        default_factory=lambda: {
+            "anthropic": {
+                "endpoint": "https://api.anthropic.com",
+                "api_key_env": "ANTHROPIC_API_KEY"
+            }
+        },
+        description="Provider configurations with endpoints and credentials"
     )
-    api_key: str = Field(
-        ...,
-        description="API key for upstream authentication",
-        min_length=1,
+    
+    # Active provider (must be in allowlist)
+    provider: str = Field(
+        default="anthropic",
+        description="Active provider name (must exist in providers config)"
     )
 
-    # Optional configuration
-    default_model: str | None = Field(
-        default=None,
-        description="Default model to use if not specified in request",
+    # Resource Limits (MUST enforce)
+    max_request_bytes: int = Field(
+        default=5 * 1024 * 1024,  # 5MB
+        description="Maximum request body size in bytes",
+        ge=1024,  # Minimum 1KB
     )
-    timeout: int = Field(
-        default=30,
+    max_response_bytes: int = Field(
+        default=20 * 1024 * 1024,  # 20MB
+        description="Maximum response body size in bytes", 
+        ge=1024,
+    )
+    timeout_seconds: int = Field(
+        default=120,
         description="Timeout for upstream requests in seconds",
         ge=1,
-        le=300,
+        le=600,  # Max 10 minutes
     )
+
+    # Server Configuration
     host: str = Field(
         default="127.0.0.1",
         description="Host to bind the proxy server to",
@@ -46,29 +66,46 @@ class ProxyConfig(BaseSettings):
         ge=1,
         le=65535,
     )
-    passthrough: bool = Field(
-        default=False,
-        description="Enable passthrough mode (bypasses all validation and filtering)",
+
+    # Logging Configuration
+    logging_mode: str = Field(
+        default="metadata",
+        description="Logging mode: off, metadata, or debug"
     )
 
-    @field_validator("upstream_base")
+    @field_validator("provider")
     @classmethod
-    def validate_upstream_base(cls, v: str) -> str:
-        """Validate that upstream_base is a valid HTTP/HTTPS URL."""
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("upstream_base must start with http:// or https://")
-        # Remove trailing slash for consistency
-        return v.rstrip("/")
-
-    @field_validator("api_key")
-    @classmethod
-    def validate_api_key(cls, v: str) -> str:
-        """Validate that api_key is not a placeholder."""
-        if v.lower() in ("dummy", "placeholder", "changeme", ""):
-            raise ValueError("api_key must be a valid API key, not a placeholder")
+    def validate_provider(cls, v: str, info) -> str:
+        """Validate that provider exists in allowlist."""
+        providers = info.data.get("providers", {})
+        if v not in providers:
+            raise ValueError(f"Provider '{v}' not in allowlist: {list(providers.keys())}")
         return v
 
-    @property
-    def upstream_url(self) -> str:
-        """Construct the full upstream URL for the messages endpoint."""
-        return f"{self.upstream_base}/v1/messages"
+    @field_validator("logging_mode")
+    @classmethod
+    def validate_logging_mode(cls, v: str) -> str:
+        """Validate logging mode is one of the allowed values."""
+        allowed = {"off", "metadata", "debug"}
+        if v not in allowed:
+            raise ValueError(f"logging_mode must be one of: {allowed}")
+        return v
+
+    def get_active_provider_config(self) -> Dict[str, Any]:
+        """Get configuration for the active provider."""
+        return self.providers[self.provider]
+    
+    def get_upstream_endpoint(self) -> str:
+        """Get the upstream endpoint URL for the active provider."""
+        provider_config = self.get_active_provider_config()
+        endpoint = provider_config["endpoint"].rstrip("/")
+        return f"{endpoint}/v1/messages"
+    
+    def get_api_key(self) -> str:
+        """Get API key for the active provider from environment."""
+        provider_config = self.get_active_provider_config()
+        env_var = provider_config["api_key_env"]
+        api_key = os.getenv(env_var)
+        if not api_key:
+            raise ValueError(f"API key not found in environment variable: {env_var}")
+        return api_key

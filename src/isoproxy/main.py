@@ -1,43 +1,62 @@
-"""Main FastAPI application for isoproxy."""
+"""Safe pass-through proxy main application.
+
+This module implements a safe pass-through proxy following these principles:
+- Strict endpoint allowlisting (no arbitrary URL forwarding)
+- Protocol preservation (forward unknown fields unchanged)
+- Resource boundaries (size/timeout limits enforced)
+- Credential isolation (agent never sees API keys)
+- Transparent operation (minimal semantic interpretation)
+"""
 
 import logging
-import json
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from isoproxy.config import ProxyConfig
 from isoproxy.errors import ProxyUpstreamError, proxy_upstream_error_handler
-from isoproxy.models import MessagesRequest
-from isoproxy.proxy import forward_to_upstream
-from isoproxy.validation import prepare_request_payload
+from isoproxy.proxy import safe_forward_request, validate_request_size, parse_request_safely
 
-# Configure minimal logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+# Configure logging based on config (will be updated after config load)
 logger = logging.getLogger("isoproxy")
 
 # Load configuration at startup (fail fast on missing/invalid config)
 try:
     config = ProxyConfig()
-    logger.info(f"Proxy configuration loaded successfully")
-    logger.info(f"Upstream: {config.upstream_base}")
+    
+    # Configure logging level based on config
+    if config.logging_mode == "off":
+        logging.getLogger("isoproxy").setLevel(logging.CRITICAL)
+    elif config.logging_mode == "debug":
+        logging.getLogger("isoproxy").setLevel(logging.DEBUG)
+    else:  # metadata
+        logging.getLogger("isoproxy").setLevel(logging.INFO)
+    
+    # Set up logging format
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        force=True
+    )
+    
+    # Log startup info (metadata only)
+    logger.info("Safe pass-through proxy starting")
+    logger.info(f"Active provider: {config.provider}")
     logger.info(f"Listening on: {config.host}:{config.port}")
-    logger.info(f"Default model: {config.default_model or 'None (passthrough)'}")
-    logger.info(f"Timeout: {config.timeout}s")
-    logger.info(f"Passthrough mode: {'ENABLED' if config.passthrough else 'DISABLED'}")
+    logger.info(f"Request limit: {config.max_request_bytes} bytes")
+    logger.info(f"Response limit: {config.max_response_bytes} bytes")
+    logger.info(f"Timeout: {config.timeout_seconds}s")
+    logger.info(f"Logging mode: {config.logging_mode}")
+    
 except Exception as e:
     logger.error(f"Configuration error: {e}")
     raise
 
 # Create FastAPI application
 app = FastAPI(
-    title="Isoproxy",
-    description="Minimal Anthropic-compatible proxy for Claude Code",
-    version="0.1.0",
-    docs_url=None,  # Disable Swagger UI
+    title="Isoproxy Safe Pass-Through",
+    description="Safe pass-through proxy for Anthropic-compatible APIs",
+    version="2.0.0",
+    docs_url=None,  # Disable Swagger UI (reduce attack surface)
     redoc_url=None,  # Disable ReDoc
 )
 
@@ -46,47 +65,43 @@ app.add_exception_handler(ProxyUpstreamError, proxy_upstream_error_handler)
 
 
 @app.post("/v1/messages")
-async def messages(request: Request) -> JSONResponse:
-    """Handle POST /v1/messages - the only supported endpoint.
+async def messages_endpoint(request: Request) -> JSONResponse:
+    """Handle POST /v1/messages - safe pass-through to upstream provider.
 
-    This endpoint operates in two modes:
-    - Normal mode: Validates request via Pydantic, applies model override
-    - Passthrough mode: Bypasses all validation and forwards request directly
+    This endpoint implements safe pass-through by:
+    1. Validating request size limits (no semantic validation)
+    2. Forwarding request verbatim to allowlisted provider endpoint
+    3. Returning upstream response unchanged (preserves protocol fidelity)
+    4. Never exposing credentials to the agent
 
     Args:
         request: Raw FastAPI Request object
 
     Returns:
-        JSONResponse with upstream status code and body
+        JSONResponse with upstream status code and body (unchanged)
 
     Raises:
-        HTTPException: On unexpected errors
+        HTTPException: On request size limits or parsing errors
         ProxyUpstreamError: On upstream failures (handled by exception handler)
     """
     try:
-        if config.passthrough:
-            # Passthrough mode: forward raw request body without validation
-            raw_body = await request.body()
-            try:
-                payload = json.loads(raw_body.decode('utf-8'))
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
-        else:
-            # Normal mode: validate and process request
-            raw_body = await request.body()
-            try:
-                request_data = json.loads(raw_body.decode('utf-8'))
-                validated_request = MessagesRequest.model_validate(request_data)
-                payload = prepare_request_payload(validated_request, config)
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
-            except Exception as e:
-                raise HTTPException(status_code=422, detail=str(e))
+        # Get raw request body
+        raw_body = await request.body()
+        
+        # Enforce request size limits (MUST enforce)
+        validate_request_size(raw_body, config)
+        
+        # Parse JSON safely (no semantic validation)
+        request_data = parse_request_safely(raw_body)
+        
+        # Log metadata only
+        if config.logging_mode in ["metadata", "debug"]:
+            logger.info(f"Request received, size: {len(raw_body)} bytes")
+        
+        # Forward to upstream with safe pass-through
+        status_code, response_body = await safe_forward_request(request_data, config)
 
-        # Forward to upstream
-        status_code, response_body = await forward_to_upstream(payload, config)
-
-        # Return verbatim
+        # Return verbatim (preserve all provider-specific fields)
         return JSONResponse(
             status_code=status_code,
             content=response_body,
@@ -112,50 +127,37 @@ async def messages_method_not_allowed() -> JSONResponse:
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
-async def catch_all(path: str, request: Request) -> JSONResponse:
-    """Handle all other routes.
-
-    In normal mode: Reject with 404 to maintain minimal attack surface
-    In passthrough mode: Forward to upstream (for maximum compatibility)
-
+async def catch_all_reject(path: str) -> JSONResponse:
+    """Reject all other routes with 404.
+    
+    Safe pass-through mode only supports /v1/messages endpoint.
+    All other paths are rejected to maintain minimal attack surface.
+    
+    This differs from the old "passthrough mode" which would forward
+    arbitrary paths - that violated the safe pass-through design principle
+    of strict endpoint allowlisting.
+    
     Args:
         path: The requested path
-        request: Raw FastAPI Request object
 
     Returns:
-        404 error response (normal mode) or upstream response (passthrough mode)
+        404 error response
     """
-    if config.passthrough:
-        # Passthrough mode: forward any request to upstream
-        try:
-            import httpx
-            raw_body = await request.body()
-            
-            # Construct upstream URL
-            upstream_url = f"{config.upstream_base}/{path.lstrip('/')}"
-            
-            # Forward the request
-            headers = {
-                "Authorization": f"Bearer {config.api_key}",
-                "Content-Type": request.headers.get("content-type", "application/json"),
-            }
-            
-            async with httpx.AsyncClient(timeout=config.timeout) as client:
-                response = await client.request(
-                    method=request.method,
-                    url=upstream_url,
-                    headers=headers,
-                    content=raw_body,
-                )
-                
-            return JSONResponse(
-                status_code=response.status_code,
-                content=response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text,
-            )
-            
-        except Exception as e:
-            logger.error(f"Error in passthrough catch-all: {e}")
-            raise HTTPException(status_code=502, detail="Bad gateway")
-    else:
-        # Normal mode: reject with 404
-        raise HTTPException(status_code=404, detail="Not found")
+    logger.warning(f"Blocked request to disallowed path: /{path}")
+    raise HTTPException(status_code=404, detail="Endpoint not allowed")
+
+
+@app.get("/health")
+async def health_check() -> JSONResponse:
+    """Basic health check endpoint.
+    
+    Returns basic status without exposing sensitive configuration details.
+    """
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "ok",
+            "proxy": "safe-pass-through", 
+            "provider": config.provider
+        }
+    )

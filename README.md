@@ -1,18 +1,30 @@
 # Isoproxy
 
-**Minimal Anthropic-compatible proxy for Claude Code**
+**Safe Pass-Through Proxy for Anthropic-Compatible APIs**
 
-Isoproxy is a lightweight HTTP proxy server that forwards Claude Code requests to a configurable Anthropic-compatible API endpoint. It enables Claude Code to run in a sandboxed environment while securely accessing the API through a trusted proxy that holds the API credentials.
+Isoproxy is a safe pass-through proxy server designed for Claude Code and other Anthropic-compatible API clients. It provides secure API access with strict boundaries while preserving full protocol fidelity.
+
+> **IMPORTANT**: This proxy does not attempt to make model output safe. Safety in this architecture comes from sandboxing, filesystem isolation, human review, and version control. The proxy's role is to be boring, predictable, and hard to misuse by accident.
 
 ## Features
 
-- **Minimal attack surface**: Only supports `POST /v1/messages`
-- **Configurable upstream**: Works with Anthropic or any compatible API provider
-- **Model override**: Optionally force all requests to use a specific model
-- **Security-first**: Error normalization prevents information leakage, no request/response body logging, localhost-only binding by default
-- **Segregated deployment**: Designed to run outside sandboxed environments (Firejail, etc.) as the only controlled egress point
-- **Simple deployment**: Single Python process, systemd service included
-- **Well-tested**: Comprehensive test suite with pytest (95% coverage)
+### Safe Pass-Through Design
+- **Strict endpoint allowlisting**: Only connects to configured provider endpoints (no arbitrary URLs)
+- **Protocol preservation**: Forwards unknown fields unchanged for maximum compatibility
+- **Resource boundaries**: Enforces request/response size limits and timeouts
+- **Credential isolation**: API keys never exposed to agents, injected securely by proxy
+- **Transparent operation**: No semantic filtering, content rewriting, or "smart" behavior
+
+### Security Boundaries
+- **Minimal attack surface**: Only supports `POST /v1/messages` and `/health`
+- **Fail-closed design**: Strict validation of configuration and resource limits
+- **Metadata-only logging**: Request/response content never logged by default
+- **No arbitrary forwarding**: Rejects all non-allowlisted endpoints
+
+### Compatibility
+- **Multi-provider support**: Anthropic, OpenRouter, and other compatible APIs
+- **Claude Code optimized**: Designed specifically for headless and interactive Claude Code
+- **Protocol fidelity**: Preserves streaming, model negotiation, and provider extensions
 
 ## Requirements
 
@@ -39,15 +51,40 @@ pip install -e .
 
 ### 2. Configuration
 
+Copy the example configuration:
 ```bash
-# Set required environment variables
-export PROXY_UPSTREAM_BASE=https://api.anthropic.com
-export PROXY_API_KEY=sk-ant-your-api-key-here
+cp .env.example .env
+```
 
-# Optional: Override model for all requests
-# export PROXY_DEFAULT_MODEL=claude-3-5-sonnet-20241022
+Edit `.env` with your settings:
+```bash
+# Provider selection (must be in allowlist)
+PROXY_PROVIDER=anthropic
 
-# Optional: Set timeout (default: 30 seconds)
+# Provider configurations
+PROXY_PROVIDERS={
+  "anthropic": {
+    "endpoint": "https://api.anthropic.com",
+    "api_key_env": "ANTHROPIC_API_KEY"  
+  }
+}
+
+# Resource limits (enforced strictly)
+PROXY_MAX_REQUEST_BYTES=5242880    # 5MB
+PROXY_MAX_RESPONSE_BYTES=20971520  # 20MB
+PROXY_TIMEOUT_SECONDS=120          # 2 minutes
+
+# Server configuration  
+PROXY_HOST=127.0.0.1
+PROXY_PORT=9000
+
+# Logging mode (off | metadata | debug)
+PROXY_LOGGING_MODE=metadata
+```
+
+Set your API keys in separate environment variables:
+```bash
+export ANTHROPIC_API_KEY=sk-ant-your-api-key-here
 # export PROXY_TIMEOUT=60
 ```
 
@@ -89,6 +126,7 @@ Claude Code will now use the proxy to access the upstream API.
 | `PROXY_TIMEOUT` | No | `30` | Timeout for upstream requests (1-300 seconds) |
 | `PROXY_HOST` | No | `127.0.0.1` | Host to bind proxy server to |
 | `PROXY_PORT` | No | `9000` | Port to bind proxy server to |
+| `PROXY_PASSTHROUGH` | No | `false` | **Development mode**: Bypass all validation and filtering |
 
 ## Testing
 
@@ -256,6 +294,45 @@ sudo systemctl status isoproxy-socket
 ```
 
 The socket will be available at `/run/isoproxy/isoproxy.sock` with proper permissions automatically managed by systemd's `RuntimeDirectory` directive.
+
+## Passthrough Mode (Development)
+
+For debugging and development purposes, isoproxy can operate in **passthrough mode**, which bypasses all validation and filtering to act as a pure HTTP proxy.
+
+### Enabling Passthrough Mode
+
+Add to your configuration file:
+
+```bash
+# In /etc/isoproxy/config.env
+PROXY_PASSTHROUGH=true
+```
+
+Then restart the service:
+```bash
+sudo systemctl restart isoproxy
+```
+
+### What Passthrough Mode Does
+
+**Bypasses all restrictions:**
+- ✅ Allows `stream: true` requests (normally rejected)
+- ✅ Forwards any model without override
+- ✅ Allows any API endpoint (not just `/v1/messages`)  
+- ✅ Disables Pydantic validation
+- ✅ Forwards all HTTP methods and routes
+
+**When to use:**
+- Debugging sandboxed agent connectivity
+- Testing with streaming requests
+- Accessing non-standard API endpoints
+- Eliminating proxy as source of errors
+
+**⚠️ Security Warning:**
+Passthrough mode disables all security filtering. Only use for development and debugging. Always set `PROXY_PASSTHROUGH=false` in production.
+
+**Verification:**
+Check logs for: `Passthrough mode: ENABLED`
 
 ## Security Notes
 

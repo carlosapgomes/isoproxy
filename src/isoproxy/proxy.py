@@ -1,69 +1,148 @@
-"""Upstream HTTP forwarding logic for isoproxy."""
+"""Safe pass-through HTTP forwarding logic.
+
+This module implements transparent forwarding with strict boundaries:
+- No semantic inspection or modification of requests/responses
+- Strict endpoint allowlisting
+- Resource limits enforced
+- Protocol fidelity preserved
+"""
 
 import logging
-from typing import Any
+import json
+from typing import Any, Dict, Tuple
 
 import httpx
 
 from isoproxy.config import ProxyConfig
-from isoproxy.errors import ProxyUpstreamError, normalize_upstream_error
+from isoproxy.errors import ProxyUpstreamError
 
 logger = logging.getLogger("isoproxy")
 
 
-async def forward_to_upstream(payload: dict, config: ProxyConfig) -> tuple[int, dict[str, Any]]:
-    """Forward request to upstream Anthropic-compatible API.
+async def safe_forward_request(
+    request_data: Dict[str, Any], 
+    config: ProxyConfig
+) -> Tuple[int, Dict[str, Any]]:
+    """Safely forward request to upstream provider with strict boundaries.
 
-    This function:
-    1. Creates an async HTTP client with configured timeout
-    2. Sends POST request to upstream with proper headers
-    3. Returns upstream response verbatim on success
-    4. Raises ProxyUpstreamError on any failure (timeout, network, etc.)
-
-    Note: Request and response bodies are never logged per security requirements.
+    This function implements safe pass-through by:
+    1. Enforcing endpoint allowlisting (no arbitrary URLs)
+    2. Injecting credentials securely (agent never sees them)
+    3. Preserving protocol fidelity (forward unknown fields)
+    4. Enforcing resource limits (size, timeout)
+    5. Returning responses verbatim (no semantic modification)
 
     Args:
-        payload: Request payload as dictionary (ready for JSON serialization)
-        config: Proxy configuration containing upstream URL and API key
+        request_data: Raw request data as dictionary
+        config: Proxy configuration with provider settings
 
     Returns:
         Tuple of (status_code, response_body) from upstream
 
     Raises:
-        ProxyUpstreamError: On any timeout, network error, or HTTP error
+        ProxyUpstreamError: On any failure (enforces fail-closed)
     """
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {config.api_key}",
-        "anthropic-version": "2023-06-01",  # Required by Anthropic API
-    }
-
     try:
-        async with httpx.AsyncClient(timeout=config.timeout) as client:
+        # Get provider configuration (enforced allowlist)
+        upstream_url = config.get_upstream_endpoint()
+        api_key = config.get_api_key()
+        
+        # Construct headers with credential injection
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+        
+        # Add Anthropic-specific headers if needed
+        provider_config = config.get_active_provider_config()
+        if "anthropic" in config.provider.lower():
+            headers["anthropic-version"] = "2023-06-01"
+        
+        # Log metadata only (never request/response content)
+        if config.logging_mode in ["metadata", "debug"]:
+            logger.info(f"Forwarding to: {config.provider} endpoint")
+            if config.logging_mode == "debug":
+                logger.debug(f"Headers: {list(headers.keys())}")
+
+        # Forward request with resource limits enforced
+        async with httpx.AsyncClient(
+            timeout=config.timeout_seconds,
+            limits=httpx.Limits(
+                max_keepalive_connections=5,
+                max_connections=10
+            )
+        ) as client:
             response = await client.post(
-                config.upstream_url,
-                json=payload,
+                upstream_url,
+                json=request_data,  # Pass through verbatim
                 headers=headers,
             )
 
-            # For successful responses (2xx), return verbatim
-            if 200 <= response.status_code < 300:
-                return response.status_code, response.json()
+            # Check response size limit
+            response_size = len(response.content)
+            if response_size > config.max_response_bytes:
+                raise ProxyUpstreamError(
+                    f"Response too large: {response_size} bytes (limit: {config.max_response_bytes})"
+                )
 
-            # For error responses (4xx/5xx), normalize to prevent info leakage
-            # This hides provider-specific error details while preserving semantic signal
-            logger.warning(f"Upstream returned error status: {response.status_code}")
-            return normalize_upstream_error(response.status_code)
+            # Log response metadata
+            if config.logging_mode in ["metadata", "debug"]:
+                logger.info(f"Response: {response.status_code}, size: {response_size} bytes")
+
+            # Return response verbatim - no error normalization in safe pass-through
+            # The upstream provider's error format should be preserved for compatibility
+            try:
+                response_data = response.json()
+            except json.JSONDecodeError:
+                # If not JSON, return as text in error format
+                response_data = {"error": {"type": "proxy_error", "message": "Non-JSON response from provider"}}
+                
+            return response.status_code, response_data
 
     except httpx.TimeoutException as e:
-        logger.error(f"Upstream timeout after {config.timeout}s: {type(e).__name__}")
-        raise ProxyUpstreamError(f"Upstream request timed out after {config.timeout}s")
+        logger.error(f"Request timeout after {config.timeout_seconds}s")
+        raise ProxyUpstreamError(f"Request timed out after {config.timeout_seconds}s")
 
     except httpx.RequestError as e:
-        logger.error(f"Upstream network error: {type(e).__name__}")
-        raise ProxyUpstreamError(f"Upstream network error: {type(e).__name__}")
+        logger.error(f"Network error: {type(e).__name__}")
+        raise ProxyUpstreamError(f"Network error: {type(e).__name__}")
 
     except Exception as e:
-        # Catch any other unexpected errors (JSON decode, etc.)
-        logger.error(f"Unexpected error during upstream request: {type(e).__name__}")
-        raise ProxyUpstreamError(f"Unexpected upstream error: {type(e).__name__}")
+        logger.error(f"Unexpected error during request: {type(e).__name__}: {e}")
+        raise ProxyUpstreamError(f"Unexpected error: {type(e).__name__}")
+
+
+def validate_request_size(request_body: bytes, config: ProxyConfig) -> None:
+    """Validate request size against configured limits.
+    
+    Args:
+        request_body: Raw request body bytes
+        config: Proxy configuration
+        
+    Raises:
+        ProxyUpstreamError: If request exceeds size limits
+    """
+    if len(request_body) > config.max_request_bytes:
+        raise ProxyUpstreamError(
+            f"Request too large: {len(request_body)} bytes (limit: {config.max_request_bytes})"
+        )
+
+
+def parse_request_safely(request_body: bytes) -> Dict[str, Any]:
+    """Parse request JSON with safe error handling.
+    
+    Args:
+        request_body: Raw request body bytes
+        
+    Returns:
+        Parsed JSON data
+        
+    Raises:
+        ProxyUpstreamError: On JSON parsing errors
+    """
+    try:
+        return json.loads(request_body.decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise ProxyUpstreamError(f"Invalid JSON: {e}")
+    except Exception as e:
+        raise ProxyUpstreamError(f"Request parsing error: {e}")
