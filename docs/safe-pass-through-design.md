@@ -5,7 +5,7 @@
 Isoproxy implements a **safe pass-through** proxy for Anthropic-compatible APIs with these characteristics:
 
 - **Strict endpoint allowlisting**: Only forwards to configured provider endpoints
-- **Protocol preservation**: Forwards unknown fields unchanged to maintain API compatibility  
+- **Protocol preservation**: Forwards unknown fields unchanged to maintain API compatibility
 - **Resource boundaries**: Enforces request/response size limits and timeouts
 - **Credential isolation**: Injects API keys securely, agent never sees credentials
 - **Transparent operation**: Minimal semantic interpretation of requests/responses
@@ -17,7 +17,7 @@ Isoproxy implements a **safe pass-through** proxy for Anthropic-compatible APIs 
 The proxy explicitly does **not**:
 
 - ❌ Detect prompt injection
-- ❌ Detect malicious code generation  
+- ❌ Detect malicious code generation
 - ❌ Prevent unsafe suggestions
 - ❌ Filter tool instructions
 - ❌ Validate semantic correctness
@@ -32,7 +32,7 @@ The proxy explicitly does **not**:
 In this architecture, safety is provided by:
 
 1. **Sandboxing**: Runtime isolation of agent execution
-2. **Filesystem isolation**: Controlled access to files and directories  
+2. **Filesystem isolation**: Controlled access to files and directories
 3. **Human review**: Explicit review processes for changes
 4. **Version control**: All changes tracked and reviewable
 5. **Workflow constraints**: Controlled deployment and execution pipelines
@@ -42,12 +42,14 @@ In this architecture, safety is provided by:
 > The proxy's role is to be **boring, predictable, and hard to misuse by accident**.
 
 This proxy is **intentionally dull** - it focuses on:
+
 - Reliable transport
-- Resource limits  
+- Resource limits
 - Credential security
 - Protocol fidelity
 
 It explicitly avoids:
+
 - Content analysis
 - Semantic filtering
 - "Smart" behavior
@@ -58,24 +60,28 @@ It explicitly avoids:
 The proxy enforces these strict boundaries:
 
 ### Transport & Endpoint Control ✅
+
 - Only connects to explicit provider allowlist
 - No DNS resolution controlled by agent input
 - No arbitrary URL forwarding
 - HTTPS required
 
 ### Credential Handling ✅
+
 - API keys injected by proxy, never forwarded from agent
-- Agent cannot read, write, or influence credentials  
+- Agent cannot read, write, or influence credentials
 - Per-provider credential isolation
 - Credentials never appear in logs
 
 ### Request Size & Shape Limits ✅
+
 - Maximum request body size enforced
 - Maximum response body size enforced
 - Timeouts enforced on upstream calls
 - Streaming responses bounded by time and size
 
 ### Protocol Preservation ✅
+
 - Anthropic-compatible JSON fields forwarded verbatim
 - Unknown fields passed through (not stripped)
 - Provider-specific extensions preserved
@@ -89,3 +95,4 @@ The proxy enforces these strict boundaries:
 - **Safety**: Provided by external systems (sandboxing, review, etc.)
 
 This proxy is **not** an authorization boundary, policy engine, or security filter.
+
