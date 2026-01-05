@@ -1,6 +1,7 @@
 """Main FastAPI application for isoproxy."""
 
 import logging
+import json
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -26,6 +27,7 @@ try:
     logger.info(f"Listening on: {config.host}:{config.port}")
     logger.info(f"Default model: {config.default_model or 'None (passthrough)'}")
     logger.info(f"Timeout: {config.timeout}s")
+    logger.info(f"Passthrough mode: {'ENABLED' if config.passthrough else 'DISABLED'}")
 except Exception as e:
     logger.error(f"Configuration error: {e}")
     raise
@@ -44,17 +46,15 @@ app.add_exception_handler(ProxyUpstreamError, proxy_upstream_error_handler)
 
 
 @app.post("/v1/messages")
-async def messages(request: MessagesRequest) -> JSONResponse:
+async def messages(request: Request) -> JSONResponse:
     """Handle POST /v1/messages - the only supported endpoint.
 
-    This endpoint:
-    1. Validates the request (via Pydantic model)
-    2. Applies model override if configured
-    3. Forwards to upstream API
-    4. Returns upstream response verbatim
+    This endpoint operates in two modes:
+    - Normal mode: Validates request via Pydantic, applies model override
+    - Passthrough mode: Bypasses all validation and forwards request directly
 
     Args:
-        request: Validated MessagesRequest from client
+        request: Raw FastAPI Request object
 
     Returns:
         JSONResponse with upstream status code and body
@@ -64,8 +64,24 @@ async def messages(request: MessagesRequest) -> JSONResponse:
         ProxyUpstreamError: On upstream failures (handled by exception handler)
     """
     try:
-        # Prepare payload with model override
-        payload = prepare_request_payload(request, config)
+        if config.passthrough:
+            # Passthrough mode: forward raw request body without validation
+            raw_body = await request.body()
+            try:
+                payload = json.loads(raw_body.decode('utf-8'))
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+        else:
+            # Normal mode: validate and process request
+            raw_body = await request.body()
+            try:
+                request_data = json.loads(raw_body.decode('utf-8'))
+                validated_request = MessagesRequest.model_validate(request_data)
+                payload = prepare_request_payload(validated_request, config)
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+            except Exception as e:
+                raise HTTPException(status_code=422, detail=str(e))
 
         # Forward to upstream
         status_code, response_body = await forward_to_upstream(payload, config)
@@ -96,16 +112,50 @@ async def messages_method_not_allowed() -> JSONResponse:
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
-async def catch_all(path: str) -> JSONResponse:
-    """Reject all other routes with 404.
+async def catch_all(path: str, request: Request) -> JSONResponse:
+    """Handle all other routes.
 
-    This explicit catch-all ensures no other endpoints are accessible,
-    maintaining minimal attack surface as per spec.
+    In normal mode: Reject with 404 to maintain minimal attack surface
+    In passthrough mode: Forward to upstream (for maximum compatibility)
 
     Args:
         path: The requested path
+        request: Raw FastAPI Request object
 
     Returns:
-        404 error response
+        404 error response (normal mode) or upstream response (passthrough mode)
     """
-    raise HTTPException(status_code=404, detail="Not found")
+    if config.passthrough:
+        # Passthrough mode: forward any request to upstream
+        try:
+            import httpx
+            raw_body = await request.body()
+            
+            # Construct upstream URL
+            upstream_url = f"{config.upstream_base}/{path.lstrip('/')}"
+            
+            # Forward the request
+            headers = {
+                "Authorization": f"Bearer {config.api_key}",
+                "Content-Type": request.headers.get("content-type", "application/json"),
+            }
+            
+            async with httpx.AsyncClient(timeout=config.timeout) as client:
+                response = await client.request(
+                    method=request.method,
+                    url=upstream_url,
+                    headers=headers,
+                    content=raw_body,
+                )
+                
+            return JSONResponse(
+                status_code=response.status_code,
+                content=response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in passthrough catch-all: {e}")
+            raise HTTPException(status_code=502, detail="Bad gateway")
+    else:
+        # Normal mode: reject with 404
+        raise HTTPException(status_code=404, detail="Not found")

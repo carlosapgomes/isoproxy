@@ -46,6 +46,10 @@ class ProxyConfig(BaseSettings):
         ge=1,
         le=65535,
     )
+    passthrough: bool = Field(
+        default=False,
+        description="Enable passthrough mode (bypasses all validation and filtering)",
+    )
 
     @field_validator("upstream_base")
     @classmethod
