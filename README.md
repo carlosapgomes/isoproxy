@@ -120,13 +120,18 @@ Claude Code will now use the proxy to access the upstream API.
 
 | Environment Variable | Required | Default | Description |
 |---------------------|----------|---------|-------------|
-| `PROXY_UPSTREAM_BASE` | Yes | - | Base URL of upstream API (e.g., `https://api.anthropic.com`) |
-| `PROXY_API_KEY` | Yes | - | API key for upstream authentication |
-| `PROXY_DEFAULT_MODEL` | No | `None` | Force all requests to use this model |
-| `PROXY_TIMEOUT` | No | `30` | Timeout for upstream requests (1-300 seconds) |
+| `PROXY_PROVIDER` | No | `anthropic` | Active provider name (must exist in `PROXY_PROVIDERS`) |
+| `PROXY_PROVIDERS` | No | `{"anthropic": {...}}` | JSON dict of provider configurations |
+| `PROXY_MAX_REQUEST_BYTES` | No | `5242880` | Maximum request size in bytes (5MB) |
+| `PROXY_MAX_RESPONSE_BYTES` | No | `20971520` | Maximum response size in bytes (20MB) |
+| `PROXY_TIMEOUT_SECONDS` | No | `120` | Timeout for upstream requests (1-600 seconds) |
 | `PROXY_HOST` | No | `127.0.0.1` | Host to bind proxy server to |
 | `PROXY_PORT` | No | `9000` | Port to bind proxy server to |
-| `PROXY_PASSTHROUGH` | No | `false` | **Development mode**: Bypass all validation and filtering |
+| `PROXY_LOGGING_MODE` | No | `metadata` | Logging mode: `off`, `metadata`, or `debug` |
+| `ANTHROPIC_API_KEY` | Yes* | - | API key for Anthropic (required if using anthropic provider) |
+| `OPENROUTER_API_KEY` | Yes* | - | API key for OpenRouter (required if using openrouter provider) |
+
+*Required depending on which provider is configured.
 
 ## Testing
 
@@ -295,44 +300,28 @@ sudo systemctl status isoproxy-socket
 
 The socket will be available at `/run/isoproxy/isoproxy.sock` with proper permissions automatically managed by systemd's `RuntimeDirectory` directive.
 
-## Passthrough Mode (Development)
+## What This Proxy Does NOT Do
 
-For debugging and development purposes, isoproxy can operate in **passthrough mode**, which bypasses all validation and filtering to act as a pure HTTP proxy.
+> **IMPORTANT**: This proxy does not attempt to make model output safe.
 
-### Enabling Passthrough Mode
+The proxy explicitly does **not**:
+- ❌ Detect prompt injection
+- ❌ Detect malicious code generation  
+- ❌ Prevent unsafe suggestions
+- ❌ Filter tool instructions
+- ❌ Validate semantic correctness
+- ❌ Enforce human approval
+- ❌ Scan content for security issues
+- ❌ Block potentially harmful outputs
+- ❌ Interpret or modify response content
+- ❌ Provide content filtering or safety guarantees
 
-Add to your configuration file:
-
-```bash
-# In /etc/isoproxy/config.env
-PROXY_PASSTHROUGH=true
-```
-
-Then restart the service:
-```bash
-sudo systemctl restart isoproxy
-```
-
-### What Passthrough Mode Does
-
-**Bypasses all restrictions:**
-- ✅ Allows `stream: true` requests (normally rejected)
-- ✅ Forwards any model without override
-- ✅ Allows any API endpoint (not just `/v1/messages`)  
-- ✅ Disables Pydantic validation
-- ✅ Forwards all HTTP methods and routes
-
-**When to use:**
-- Debugging sandboxed agent connectivity
-- Testing with streaming requests
-- Accessing non-standard API endpoints
-- Eliminating proxy as source of errors
-
-**⚠️ Security Warning:**
-Passthrough mode disables all security filtering. Only use for development and debugging. Always set `PROXY_PASSTHROUGH=false` in production.
-
-**Verification:**
-Check logs for: `Passthrough mode: ENABLED`
+Safety in this architecture comes from:
+1. **Sandboxing**: Runtime isolation of agent execution
+2. **Filesystem isolation**: Controlled access to files and directories  
+3. **Human review**: Explicit review processes for changes
+4. **Version control**: All changes tracked and reviewable
+5. **Workflow constraints**: Controlled deployment and execution pipelines
 
 ## Security Notes
 
@@ -341,12 +330,9 @@ Check logs for: `Passthrough mode: ENABLED`
 ## Security Considerations
 
 - **Localhost only**: By default, the proxy binds to `127.0.0.1` and is only accessible from the local machine
-- **No request/response logging**: Request and response bodies are never logged to prevent data leakage
-- **Error normalization**: All upstream errors (4xx/5xx) are normalized to prevent information leakage:
-  - Status codes are preserved for functional behavior (retry/backoff logic)
-  - Error messages are sanitized to hide provider-specific details
-  - Rate limit numbers, error taxonomy, and other sensitive details are stripped
-  - Network/timeout errors return generic 502 responses
+- **No request/response logging**: Request and response bodies are never logged by default (metadata-only logging)
+- **Protocol preservation**: Upstream errors are passed through unchanged to maintain compatibility
+- **Credential isolation**: API keys are never exposed to agents, loaded from secure environment variables
 - **systemd hardening**: The included service file implements comprehensive security features:
   - `NoNewPrivileges`, `PrivateDevices`, `PrivateTmp` prevent privilege escalation
   - `ProtectSystem`, `ProtectHome`, `ProtectKernel*` restrict filesystem access
@@ -388,16 +374,15 @@ Check logs for: `Passthrough mode: ENABLED`
 
 ## API
 
-### Supported Endpoint
+### Supported Endpoints
 
-- `POST /v1/messages`: Forward request to upstream Anthropic Messages API
+- `POST /v1/messages`: Forward request to upstream provider (preserves all fields including streaming)
+- `GET /health`: Basic health check endpoint
 
 ### Unsupported
 
-- Streaming (`stream: true` is rejected with 422)
-- All other routes (return 404)
-- Tools/function calling
-- Any modifications to request/response bodies
+- All other routes (return 404 with "Endpoint not allowed")
+- Arbitrary URL forwarding (strict allowlisting enforced)
 
 ## Troubleshooting
 
@@ -415,9 +400,9 @@ Check logs for: `Passthrough mode: ENABLED`
 
 ### Upstream errors
 
-- Check `PROXY_UPSTREAM_BASE` is correct
-- Verify `PROXY_API_KEY` is valid
-- Check network connectivity to upstream
+- Check `PROXY_PROVIDER` is set correctly
+- Verify the correct API key environment variable is set (e.g., `ANTHROPIC_API_KEY`)
+- Check network connectivity to upstream provider
 - Review logs: `journalctl -u isoproxy -f`
 
 ## Development
@@ -428,21 +413,27 @@ Check logs for: `Passthrough mode: ENABLED`
 isoproxy/
 ├── src/isoproxy/
 │   ├── __init__.py       # Package metadata
-│   ├── main.py           # FastAPI application
-│   ├── config.py         # Configuration management
-│   ├── models.py         # Pydantic models
-│   ├── validation.py     # Request processing
-│   ├── proxy.py          # Upstream forwarding
+│   ├── main.py           # FastAPI application (safe pass-through)
+│   ├── config.py         # Configuration management  
+│   ├── models.py         # Minimal models (error types only)
+│   ├── proxy.py          # Safe forwarding logic
 │   └── errors.py         # Error handling
 ├── tests/                # Test suite
 ├── deployment/           # Deployment files
+├── docs/                 # Design documentation
 ├── pyproject.toml        # Project configuration
 └── README.md             # This file
 ```
 
 ### Adding Features
 
-This proxy is intentionally minimal. Before adding features, consider if they align with the security model documented in `specs.md`.
+This proxy is intentionally minimal and follows the safe pass-through design. Before adding features, consider if they align with the design principles documented in `docs/safe-pass-through-design.md`.
+
+The proxy should remain:
+- Boring and predictable
+- Transparent (no semantic filtering)  
+- Hard to misuse by accident
+- Focused on transport, limits, credentials, and protocol fidelity
 
 ## License
 
