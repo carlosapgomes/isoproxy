@@ -1,10 +1,18 @@
 # Isoproxy
 
-**Safe Pass-Through Proxy for Anthropic-Compatible APIs**
+**Safe Pass-Through Proxy for Sandboxed Environments**
 
-Isoproxy is a safe pass-through proxy server designed for Claude Code and other Anthropic-compatible API clients. It provides secure API access with strict boundaries while preserving full protocol fidelity.
+Isoproxy is a safe pass-through proxy server designed specifically for [papercage](https://github.com/carlosapgomes/papercage) and other sandboxed environments. It enables secure API access from isolated agents through Unix domain sockets while maintaining strict security boundaries.
 
-> **IMPORTANT**: This proxy does not attempt to make model output safe. Safety in this architecture comes from sandboxing, filesystem isolation, human review, and version control. The proxy's role is to be boring, predictable, and hard to misuse by accident.
+> **IMPORTANT**: This proxy does not attempt to make model output safe. Safety in this architecture comes from sandboxing (papercage), filesystem isolation, human review, and version control. The proxy's role is to be boring, predictable, and hard to misuse by accident.
+
+## Primary Use Case: Papercage Integration
+
+```
+Agent (in papercage sandbox) --UDS--> Isoproxy (outside) --HTTPS--> Inference Provider
+```
+
+The proxy runs **outside** the sandbox environment and accepts connections from sandboxed agents via Unix domain sockets, providing the only controlled path for API access.
 
 ## Features
 
@@ -21,9 +29,10 @@ Isoproxy is a safe pass-through proxy server designed for Claude Code and other 
 - **Metadata-only logging**: Request/response content never logged by default
 - **No arbitrary forwarding**: Rejects all non-allowlisted endpoints
 
-### Compatibility
-- **Multi-provider support**: Anthropic, OpenRouter, and other compatible APIs
-- **Claude Code optimized**: Designed specifically for headless and interactive Claude Code
+### Sandboxed Environment Integration
+- **Unix domain socket binding**: Default server mode for sandboxed agents
+- **Papercage optimized**: Designed specifically for papercage sandbox integration
+- **Multi-provider support**: Anthropic, OpenRouter, and other compatible APIs  
 - **Protocol fidelity**: Preserves streaming, model negotiation, and provider extensions
 
 ## Requirements
@@ -97,24 +106,30 @@ cp deployment/.env.example .env
 
 ### 3. Run the Proxy
 
+**For papercage integration (recommended):**
 ```bash
-# Development mode (with auto-reload)
-uvicorn isoproxy.main:app --reload --host 127.0.0.1 --port 9000
-
-# Production mode
-uvicorn isoproxy.main:app --host 127.0.0.1 --port 9000 --workers 1
+# Production mode with Unix domain socket (default for sandboxes)
+uvicorn isoproxy.main:app --uds /run/isoproxy/isoproxy.sock --workers 1
 ```
 
-### 4. Configure Claude Code
+**For development/testing:**
+```bash  
+# Development mode with HTTP (for testing outside sandbox)
+uvicorn isoproxy.main:app --reload --host 127.0.0.1 --port 9000
+```
 
-In your Claude Code sandbox environment:
+### 4. Configure Sandboxed Agent
 
+**For papercage (Unix domain socket):**
+Configure the agent to connect via Unix socket at `/run/isoproxy/isoproxy.sock`
+
+**For development/testing (HTTP):**
 ```bash
 export ANTHROPIC_API_BASE=http://127.0.0.1:9000
 export ANTHROPIC_API_KEY=dummy  # Ignored by proxy
 ```
 
-Claude Code will now use the proxy to access the upstream API.
+The agent will now use the proxy to access the upstream API through the configured transport.
 
 ## Configuration Reference
 
@@ -225,13 +240,14 @@ echo 'include "/etc/nftables.d/llmproxy.conf"' | sudo tee -a /etc/nftables.conf
 sudo nft -f /etc/nftables.conf
 ```
 
-## Unix Socket Configuration
+## Unix Socket Configuration (Recommended)
 
-For enhanced security or integration with other services, isoproxy can bind to Unix domain sockets instead of TCP ports. This provides:
+Isoproxy is designed primarily for Unix domain sockets when working with sandboxed environments like papercage. This provides:
 
 - **Filesystem-level access control**: Socket permissions control access
-- **Reduced attack surface**: No network exposure, even locally
-- **Integration capabilities**: Easy connection from other services or proxies
+- **Reduced attack surface**: No network exposure, even locally  
+- **Sandbox integration**: Perfect for papercage and other containerized environments
+- **High performance**: Lower overhead than TCP sockets
 
 ### Basic Unix Socket Setup
 
@@ -249,14 +265,20 @@ sudo -u isoproxy \
     --workers 1
 ```
 
-### Configure Client Access
+### Configure Papercage Access
 
-Access via curl with Unix socket:
+When using with papercage, configure the sandbox to route API calls through the Unix socket:
+```bash
+# Inside papercage sandbox configuration
+export ANTHROPIC_API_SOCKET=/run/isoproxy/isoproxy.sock
+```
+
+For testing with curl:
 ```bash
 curl --unix-socket /run/isoproxy/isoproxy.sock \
      -X POST \
      -H "Content-Type: application/json" \
-     -d '{"messages": [...]}' \
+     -d '{"model": "claude-3-sonnet", "messages": [...]}' \
      http://localhost/v1/messages
 ```
 

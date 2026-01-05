@@ -2,13 +2,14 @@
 
 ## What This Proxy Does
 
-Isoproxy implements a **safe pass-through** proxy for Anthropic-compatible APIs with these characteristics:
+Isoproxy implements a **safe pass-through** proxy designed for sandboxed environments (especially [papercage](https://github.com/carlosapgomes/papercage)) with these characteristics:
 
 - **Strict endpoint allowlisting**: Only forwards to configured provider endpoints
 - **Protocol preservation**: Forwards unknown fields unchanged to maintain API compatibility
 - **Resource boundaries**: Enforces request/response size limits and timeouts
 - **Credential isolation**: Injects API keys securely, agent never sees credentials
 - **Transparent operation**: Minimal semantic interpretation of requests/responses
+- **Unix domain socket support**: Designed for sandboxed environments like papercage
 
 ## What This Proxy Explicitly Does NOT Do
 
@@ -31,11 +32,12 @@ The proxy explicitly does **not**:
 
 In this architecture, safety is provided by:
 
-1. **Sandboxing**: Runtime isolation of agent execution
+1. **Sandboxing**: Runtime isolation of agent execution (e.g., papercage)
 2. **Filesystem isolation**: Controlled access to files and directories
-3. **Human review**: Explicit review processes for changes
-4. **Version control**: All changes tracked and reviewable
-5. **Workflow constraints**: Controlled deployment and execution pipelines
+3. **Network isolation**: Unix domain sockets prevent direct network access
+4. **Human review**: Explicit review processes for changes
+5. **Version control**: All changes tracked and reviewable
+6. **Workflow constraints**: Controlled deployment and execution pipelines
 
 ## Design Philosophy
 

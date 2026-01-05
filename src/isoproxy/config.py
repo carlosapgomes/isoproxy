@@ -67,6 +67,7 @@ class ProxyConfig(BaseSettings):
         le=65535,
     )
 
+
     # Logging Configuration
     logging_mode: str = Field(
         default="metadata",

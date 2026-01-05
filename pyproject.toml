@@ -1,7 +1,7 @@
 [project]
 name = "isoproxy"
 version = "0.1.0"
-description = "Minimal Anthropic-compatible proxy for Claude Code"
+description = "Safe pass-through proxy for sandboxed environments (papercage integration)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
