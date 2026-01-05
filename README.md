@@ -32,7 +32,7 @@ The proxy runs **outside** the sandbox environment and accepts connections from 
 ### Sandboxed Environment Integration
 - **Unix domain socket binding**: Default server mode for sandboxed agents
 - **Papercage optimized**: Designed specifically for papercage sandbox integration
-- **Multi-provider support**: Anthropic, OpenRouter, and other compatible APIs  
+- **Multi-provider support**: Anthropic and other Anthropic-compatible APIs
 - **Protocol fidelity**: Preserves streaming, model negotiation, and provider extensions
 
 ## Requirements
@@ -144,9 +144,28 @@ The agent will now use the proxy to access the upstream API through the configur
 | `PROXY_PORT` | No | `9000` | Port to bind proxy server to |
 | `PROXY_LOGGING_MODE` | No | `metadata` | Logging mode: `off`, `metadata`, or `debug` |
 | `ANTHROPIC_API_KEY` | Yes* | - | API key for Anthropic (required if using anthropic provider) |
-| `OPENROUTER_API_KEY` | Yes* | - | API key for OpenRouter (required if using openrouter provider) |
-
 *Required depending on which provider is configured.
+
+## Provider Compatibility
+
+**IMPORTANT**: Isoproxy is designed specifically for **Claude Code**, which is the only LLM coding assistant that uses Anthropic's API protocol. On the server side, isoproxy works with **Anthropic-compatible** API endpoints that use the Anthropic protocol format. This includes:
+
+✅ **Compatible providers:**
+- Anthropic (api.anthropic.com) - native support
+- Z.ai GLM-4.7 - offers Anthropic-compatible endpoints  
+- Moonshot Kimi K2 - offers Anthropic-compatible endpoints
+- Other inference providers that offer Anthropic-compatible APIs
+
+❌ **Incompatible providers:**
+- OpenRouter - only offers OpenAI-compatible endpoints, not Anthropic-compatible
+- OpenAI API directly - uses OpenAI protocol format
+- Most inference providers that only support OpenAI-compatible formats
+
+**Client Compatibility:**
+- ✅ **Claude Code** - designed specifically for this use case
+- ❌ **Other LLM coding assistants** (Cursor, Continue, Aider, etc.) - these use OpenAI-compatible protocols
+
+If you need to use Claude models with other coding assistants through OpenRouter or other OpenAI-compatible providers, you would need a different proxy that translates between OpenAI and Anthropic protocols. Isoproxy maintains protocol fidelity and does not perform protocol translation.
 
 ## Testing
 
