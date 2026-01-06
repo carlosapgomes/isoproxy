@@ -49,7 +49,7 @@ class ProxyConfig(BaseSettings):
         ge=1024,
     )
     timeout_seconds: int = Field(
-        default=120,
+        default=300,
         description="Timeout for upstream requests in seconds",
         ge=1,
         le=600,  # Max 10 minutes

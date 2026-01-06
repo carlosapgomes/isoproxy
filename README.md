@@ -86,7 +86,7 @@ PROXY_PROVIDERS={
 # Resource limits (enforced strictly)
 PROXY_MAX_REQUEST_BYTES=5242880    # 5MB
 PROXY_MAX_RESPONSE_BYTES=20971520  # 20MB
-PROXY_TIMEOUT_SECONDS=120          # 2 minutes
+PROXY_TIMEOUT_SECONDS=300          # 5 minutes
 
 # Server configuration
 PROXY_HOST=127.0.0.1
@@ -148,7 +148,7 @@ The agent will now use the proxy to access the upstream API through the configur
 | `PROXY_PROVIDERS`          | No       | `{"anthropic": {...}}` | JSON dict of provider configurations                         |
 | `PROXY_MAX_REQUEST_BYTES`  | No       | `5242880`              | Maximum request size in bytes (5MB)                          |
 | `PROXY_MAX_RESPONSE_BYTES` | No       | `20971520`             | Maximum response size in bytes (20MB)                        |
-| `PROXY_TIMEOUT_SECONDS`    | No       | `120`                  | Timeout for upstream requests (1-600 seconds)                |
+| `PROXY_TIMEOUT_SECONDS`    | No       | `300`                  | Timeout for upstream requests (1-600 seconds)                |
 | `PROXY_HOST`               | No       | `127.0.0.1`            | Host to bind proxy server to                                 |
 | `PROXY_PORT`               | No       | `9000`                 | Port to bind proxy server to                                 |
 | `PROXY_LOGGING_MODE`       | No       | `metadata`             | Logging mode: `off`, `metadata`, or `debug`                  |
@@ -158,7 +158,11 @@ The agent will now use the proxy to access the upstream API through the configur
 
 ## Provider Compatibility
 
-**IMPORTANT**: Isoproxy is designed specifically for **Claude Code**, which is the only LLM coding assistant that uses Anthropic's API protocol. On the server side, isoproxy works with **Anthropic-compatible** API endpoints that use the Anthropic protocol format. This includes:
+**IMPORTANT**: Isoproxy can enable coding assistants that support Anthropic's native API protocol to connect to Anthropic-compatible inference providers while running in sandboxed environments. This includes tools like Claude Code, Aider, Cline/Roo Code, Continue, Goose, OpenHands, and others with native Anthropic support.
+
+**Note**: Isoproxy has been tested and validated primarily with **Claude Code**. While it should work with other Anthropic-native clients, compatibility with specific features (prompt caching, tool calling, thinking tokens) may vary and has not been extensively tested.
+
+On the server side, isoproxy works with **Anthropic-compatible** API endpoints that use the Anthropic protocol format. This includes:
 
 ✅ **Compatible providers:**
 
@@ -175,10 +179,11 @@ The agent will now use the proxy to access the upstream API through the configur
 
 **Client Compatibility:**
 
-- ✅ **Claude Code** - designed specifically for this use case
-- ❌ **Other LLM coding assistants** (Cursor, Continue, Aider, etc.) - these use OpenAI-compatible protocols
+- ✅ **Claude Code** - extensively tested and validated
+- ✅ **Aider, Cline/Roo Code, Continue, Goose, OpenHands** - should work (native Anthropic API support) but not extensively tested
+- ❌ **Cursor and other OpenAI-only tools** - incompatible (use OpenAI-compatible protocols only)
 
-If you need to use Claude models with other coding assistants through OpenRouter or other OpenAI-compatible providers, you would need a different proxy that translates between OpenAI and Anthropic protocols. Isoproxy maintains protocol fidelity and does not perform protocol translation.
+If you need to use Claude models with OpenAI-only coding assistants, you would need a different proxy that translates between OpenAI and Anthropic protocols. Isoproxy maintains protocol fidelity and does not perform protocol translation.
 
 ## Testing
 
