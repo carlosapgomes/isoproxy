@@ -41,7 +41,7 @@ The proxy runs **outside** the sandbox environment and accepts connections from 
 ## Requirements
 
 - Python 3.11+
-- [uv](https://github.com/astral-sh/uv) (recommended) or pip
+- pip (standard Python package manager)
 
 ## Production Deployment
 
@@ -160,6 +160,8 @@ On the server side, isoproxy works with **Anthropic-compatible** API endpoints t
 If you need to use Claude models with OpenAI-only coding assistants, you would need a different proxy that translates between OpenAI and Anthropic protocols. Isoproxy maintains protocol fidelity and does not perform protocol translation.
 
 ## Testing
+
+> **Note**: `uv` is only recommended as a faster alternative for dependency management during development, but is not required.
 
 ```bash
 # Install development dependencies
