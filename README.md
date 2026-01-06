@@ -153,7 +153,7 @@ On the server side, isoproxy works with **Anthropic-compatible** API endpoints t
 
 **Client Compatibility:**
 
-- ✅ **Claude Code** - tested and validated
+- ✅ **Claude Code** - tested
 - ✅ **Aider, Cline/Roo Code, Continue, Goose, OpenHands** - should work (native Anthropic API support) but not tested
 - ❌ **Cursor and other OpenAI-only tools** - incompatible (use OpenAI-compatible protocols only)
 
