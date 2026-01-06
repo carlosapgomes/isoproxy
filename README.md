@@ -134,7 +134,7 @@ The socket will be available at `/run/isoproxy/isoproxy.sock` with proper permis
 
 **IMPORTANT**: Isoproxy can enable coding assistants that support Anthropic's native API protocol to connect to Anthropic-compatible inference providers while running in sandboxed environments. This includes tools like Claude Code, Aider, Cline/Roo Code, Continue, Goose, OpenHands, and others with native Anthropic support.
 
-**Note**: Isoproxy has been tested and validated primarily with **Claude Code**. While it should work with other Anthropic-native clients, compatibility with specific features (prompt caching, tool calling, thinking tokens) may vary and has not been extensively tested.
+**Note**: Isoproxy has only been tested with **Claude Code**. While it should work with other Anthropic-native clients, compatibility with specific features (prompt caching, tool calling, thinking tokens) may vary and has not been tested.
 
 On the server side, isoproxy works with **Anthropic-compatible** API endpoints that use the Anthropic protocol format. This includes:
 
@@ -153,8 +153,8 @@ On the server side, isoproxy works with **Anthropic-compatible** API endpoints t
 
 **Client Compatibility:**
 
-- ✅ **Claude Code** - extensively tested and validated
-- ✅ **Aider, Cline/Roo Code, Continue, Goose, OpenHands** - should work (native Anthropic API support) but not extensively tested
+- ✅ **Claude Code** - tested and validated
+- ✅ **Aider, Cline/Roo Code, Continue, Goose, OpenHands** - should work (native Anthropic API support) but not tested
 - ❌ **Cursor and other OpenAI-only tools** - incompatible (use OpenAI-compatible protocols only)
 
 If you need to use Claude models with OpenAI-only coding assistants, you would need a different proxy that translates between OpenAI and Anthropic protocols. Isoproxy maintains protocol fidelity and does not perform protocol translation.
