@@ -432,7 +432,7 @@ export ANTHROPIC_API_BASE=http://127.0.0.1:9000
 export ANTHROPIC_API_KEY=dummy  # Ignored by proxy
 ```
 
-### Optional Defense-in-Depth Measures
+## Appendix: Optional Defense-in-Depth Measures
 
 The following network filtering configuration is **not required** for isoproxy to function safely. The architecture does not rely on firewall rules for correctness or safety, as endpoint allowlisting is implemented at the application level.
 
@@ -444,7 +444,7 @@ These examples are provided as optional hardening steps that may help with:
 
 Users who prefer simpler setups can omit firewall configuration without breaking the proxy functionality.
 
-#### Optional Network Egress Filtering
+### Optional Network Egress Filtering
 
 If you want additional network-level restrictions, you can use the provided nftables configuration:
 
