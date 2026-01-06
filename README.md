@@ -72,14 +72,21 @@ sudo -u isoproxy .venv/bin/pip install .
 ```bash
 # Create secure configuration directory
 sudo mkdir -p /etc/isoproxy
-sudo cp deployment/config.env.example /etc/isoproxy/config.env
 
-# Edit configuration with your API keys and settings
+# Copy configuration templates
+sudo cp deployment/config.env.example /etc/isoproxy/config.env
+sudo cp deployment/secrets.env.example /etc/isoproxy/secrets.env
+
+# Edit non-sensitive configuration
 sudo nano /etc/isoproxy/config.env
 
-# Secure the configuration file
-sudo chown isoproxy:isoproxy /etc/isoproxy/config.env
-sudo chmod 600 /etc/isoproxy/config.env
+# Edit API keys and secrets
+sudo nano /etc/isoproxy/secrets.env
+
+# Set proper ownership and permissions
+sudo chown isoproxy:isoproxy /etc/isoproxy/config.env /etc/isoproxy/secrets.env
+sudo chmod 644 /etc/isoproxy/config.env    # Non-sensitive config
+sudo chmod 600 /etc/isoproxy/secrets.env   # Sensitive secrets only
 ```
 
 ### 4. Install and Start Service
@@ -403,7 +410,10 @@ nano .env
 3. **Set API Key**:
 
 ```bash
-# Set your API key
+# For development, you can add API keys directly to .env or use environment variables
+echo "ANTHROPIC_API_KEY=sk-ant-your-api-key-here" >> .env
+
+# OR export as environment variable
 export ANTHROPIC_API_KEY=sk-ant-your-api-key-here
 ```
 

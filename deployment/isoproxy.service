@@ -9,10 +9,11 @@ User=isoproxy
 Group=isoproxy
 WorkingDirectory=/opt/isoproxy
 
-# Load environment variables from secure config file
-# Create with: sudo -u isoproxy nano /etc/isoproxy/config.env
-# Secure with: sudo chmod 600 /etc/isoproxy/config.env
+# Load environment variables from config files
+# Non-sensitive configuration
 EnvironmentFile=/etc/isoproxy/config.env
+# Sensitive API keys (stricter permissions)
+EnvironmentFile=/etc/isoproxy/secrets.env
 
 # Start the proxy server
 ExecStart=/opt/isoproxy/.venv/bin/uvicorn isoproxy.main:app \
