@@ -43,102 +43,69 @@ The proxy runs **outside** the sandbox environment and accepts connections from 
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
 
-## Quick Start
+## Production Deployment
 
-### 1. Installation
+**Recommended for all use cases, especially sandboxed environments like papercage.**
 
-```bash
-# Clone or download the repository
-cd isoproxy
-
-# Create virtual environment and install dependencies with uv
-uv venv
-uv pip install -e .
-
-# Or with pip
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e .
-```
-
-### 2. Configuration
-
-Copy the example configuration:
+### 1. Create Dedicated User
 
 ```bash
-cp .env.example .env
+sudo useradd -r -s /bin/false isoproxy
 ```
 
-Edit `.env` with your settings:
+### 2. Install Isoproxy
 
 ```bash
-# Provider selection (must be in allowlist)
-PROXY_PROVIDER=anthropic
+# Create installation directory
+sudo mkdir -p /opt/isoproxy
+sudo chown isoproxy:isoproxy /opt/isoproxy
 
-# Provider configurations
-PROXY_PROVIDERS={
-  "anthropic": {
-    "endpoint": "https://api.anthropic.com",
-    "api_key_env": "ANTHROPIC_API_KEY"
-  }
-}
-
-# Resource limits (enforced strictly)
-PROXY_MAX_REQUEST_BYTES=5242880    # 5MB
-PROXY_MAX_RESPONSE_BYTES=20971520  # 20MB
-PROXY_TIMEOUT_SECONDS=300          # 5 minutes
-
-# Server configuration
-PROXY_HOST=127.0.0.1
-PROXY_PORT=9000
-
-# Logging mode (off | metadata | debug)
-PROXY_LOGGING_MODE=metadata
+# Clone and install
+sudo -u isoproxy git clone https://github.com/carlosapgomes/isoproxy.git /opt/isoproxy
+cd /opt/isoproxy
+sudo -u isoproxy python3 -m venv .venv
+sudo -u isoproxy .venv/bin/pip install .
 ```
 
-Set your API keys in separate environment variables:
+### 3. Configure Isoproxy
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-your-api-key-here
-# export PROXY_TIMEOUT=60
+# Create secure configuration directory
+sudo mkdir -p /etc/isoproxy
+sudo cp deployment/config.env.example /etc/isoproxy/config.env
+
+# Edit configuration with your API keys and settings
+sudo nano /etc/isoproxy/config.env
+
+# Secure the configuration file
+sudo chown isoproxy:isoproxy /etc/isoproxy/config.env
+sudo chmod 600 /etc/isoproxy/config.env
 ```
 
-Alternatively, copy `deployment/.env.example` to `.env` and fill in your values:
+### 4. Install and Start Service
 
 ```bash
-cp deployment/.env.example .env
-# Edit .env with your favorite editor
+# Install systemd service
+sudo cp deployment/isoproxy.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable isoproxy
+sudo systemctl start isoproxy
+
+# Verify it's running
+sudo systemctl status isoproxy
+sudo journalctl -u isoproxy -f
 ```
 
-### 3. Run the Proxy
+### 5. Configure Sandboxed Agent
 
-**For papercage integration (recommended):**
+For papercage or other sandboxed environments, configure the agent to connect via Unix socket:
 
 ```bash
-# Production mode with Unix domain socket (default for sandboxes)
-uvicorn isoproxy.main:app --uds /run/isoproxy/isoproxy.sock --workers 1
+# Inside sandbox configuration
+export ANTHROPIC_API_SOCKET=/run/isoproxy/isoproxy.sock
 ```
 
-**For development/testing:**
-
-```bash
-# Development mode with HTTP (for testing outside sandbox)
-uvicorn isoproxy.main:app --reload --host 127.0.0.1 --port 9000
-```
-
-### 4. Configure Sandboxed Agent
-
-**For papercage (Unix domain socket):**
-Configure the agent to connect via Unix socket at `/run/isoproxy/isoproxy.sock`
-
-**For development/testing (HTTP):**
-
-```bash
-export ANTHROPIC_API_BASE=http://127.0.0.1:9000
-export ANTHROPIC_API_KEY=dummy  # Ignored by proxy
-```
-
-The agent will now use the proxy to access the upstream API through the configured transport.
+The socket will be available at `/run/isoproxy/isoproxy.sock` with proper permissions managed by systemd.
 
 ## Configuration Reference
 
@@ -211,103 +178,11 @@ ruff check src/ tests/
 ruff format src/ tests/
 ```
 
-## Production Deployment
-
-1. Create a dedicated user:
-
-```bash
-sudo useradd -r -s /bin/false isoproxy
-```
-
-2. Create installation directory:
-
-```bash
-sudo mkdir -p /opt/isoproxy
-sudo chown isoproxy:isoproxy /opt/isoproxy
-```
-
-3. Clone and install the proxy:
-
-```bash
-sudo -u isoproxy git clone https://github.com/carlosapgomes/isoproxy.git /opt/isoproxy
-cd /opt/isoproxy
-sudo -u isoproxy python3 -m venv .venv
-sudo -u isoproxy .venv/bin/pip install .
-```
-
-4. Create configuration:
-
-```bash
-sudo mkdir -p /etc/isoproxy
-sudo cp deployment/.env.example /etc/isoproxy/config.env
-sudo nano /etc/isoproxy/config.env  # Edit configuration
-sudo chown -R isoproxy:isoproxy /etc/isoproxy
-sudo chmod 600 /etc/isoproxy/config.env
-```
-
-5. Install and start service:
-
-```bash
-sudo cp deployment/isoproxy.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable isoproxy
-sudo systemctl start isoproxy
-```
-
-6. Check status:
-
-```bash
-sudo systemctl status isoproxy
-sudo journalctl -u isoproxy -f
-```
-
-## Unix Socket Configuration (Recommended)
-
-Isoproxy is designed primarily for Unix domain sockets when working with sandboxed environments like papercage. This provides:
-
-- **Filesystem-level access control**: Socket permissions control access
-- **Reduced attack surface**: No network exposure, even locally
-- **Sandbox integration**: Perfect for papercage and other containerized environments
-- **High performance**: Lower overhead than TCP sockets
-
-### Basic Unix Socket Setup
-
-```bash
-# Create socket directory with proper permissions
-sudo mkdir -p /run/isoproxy
-sudo chown isoproxy:isoproxy /run/isoproxy
-sudo chmod 755 /run/isoproxy
-
-# Start with Unix socket
-sudo -u isoproxy \
-  env $(cat /etc/isoproxy/config.env | xargs) \
-  /opt/isoproxy/.venv/bin/uvicorn isoproxy.main:app \
-    --uds /run/isoproxy/isoproxy.sock \
-    --workers 1
-```
-
-### Configure Papercage Access
-
-When using with papercage, configure the sandbox to route API calls through the Unix socket:
-
-```bash
-# Inside papercage sandbox configuration
-export ANTHROPIC_API_SOCKET=/run/isoproxy/isoproxy.sock
-```
-
-For testing with curl:
-
-```bash
-curl --unix-socket /run/isoproxy/isoproxy.sock \
-     -X POST \
-     -H "Content-Type: application/json" \
-     -d '{"model": "claude-3-sonnet", "messages": [...]}' \
-     http://localhost/v1/messages
-```
+## Advanced Configuration
 
 ### Integration with HTTP Proxy
 
-Use with nginx, Apache, or other HTTP proxies:
+If you need to expose isoproxy through an HTTP proxy (nginx, Apache), you can proxy to the Unix socket:
 
 **nginx example:**
 
@@ -327,24 +202,17 @@ server {
 }
 ```
 
-### systemd Service for Unix Socket
+### Testing the Unix Socket
 
-A dedicated service file is provided for Unix socket deployment:
+For testing with curl:
 
 ```bash
-# Install the Unix socket service
-sudo cp deployment/isoproxy-socket.service /etc/systemd/system/
-
-# Update the service file to use 'isoproxy' user (if needed)
-sudo systemctl daemon-reload
-sudo systemctl enable isoproxy-socket
-sudo systemctl start isoproxy-socket
-
-# Check status
-sudo systemctl status isoproxy-socket
+curl --unix-socket /run/isoproxy/isoproxy.sock \
+     -X POST \
+     -H "Content-Type: application/json" \
+     -d '{"model": "claude-3-sonnet", "messages": [...]}' \
+     http://localhost/v1/messages
 ```
-
-The socket will be available at `/run/isoproxy/isoproxy.sock` with proper permissions automatically managed by systemd's `RuntimeDirectory` directive.
 
 ## What This Proxy Does NOT Do
 
@@ -396,24 +264,32 @@ Safety in this architecture comes from:
 ## Architecture
 
 ```
-┌──────────────┐
-│ Claude Code  │
-│  (Sandbox)   │
-└──────┬───────┘
-       │ POST /v1/messages
-       │ http://127.0.0.1:9000
-       ▼
-┌──────────────┐
-│  Isoproxy    │
-│ (localhost)  │
-└──────┬───────┘
-       │ POST /v1/messages
-       │ https://api.anthropic.com
-       ▼
-┌──────────────┐
-│   Upstream   │
-│  Provider    │
-└──────────────┘
+┌──────────────────────┐
+│   Sandboxed Agent    │
+│   (Claude Code)      │
+│                      │
+│ POST /v1/messages    │
+│ via ANTHROPIC_API_*  │
+└──────────┬───────────┘
+           │ Unix Domain Socket
+           │ /run/isoproxy/isoproxy.sock
+           ▼
+┌──────────────────────┐
+│      Isoproxy        │
+│   (outside sandbox)  │
+│                      │
+│ • Endpoint allowlist │
+│ • API key injection  │
+│ • Resource limits    │
+└──────────┬───────────┘
+           │ POST /v1/messages
+           │ https://api.anthropic.com
+           ▼
+┌──────────────────────┐
+│   Upstream Provider  │
+│   (Anthropic, Z.ai,  │
+│   Moonshot, etc.)    │
+└──────────────────────┘
 ```
 
 ## API
@@ -491,9 +367,64 @@ This project was developed with AI assistance:
 - Initial specification (`specs.md`) was written by ChatGPT (OpenAI)
 - Implementation, architecture, test suite, and documentation were generated by Claude Code (Anthropic)
 
-## Appendix: Optional Defense-in-Depth Measures
+## Appendix: Development and Testing
 
-The following configuration is **not required** for isoproxy to function safely. The architecture does not rely on firewall rules for correctness or safety, as endpoint allowlisting is implemented at the application level.
+**⚠️ WARNING**: The following setup is for development and testing only. Do not use in production environments as it stores API keys in the working directory and lacks proper security isolation.
+
+### Development Quick Start
+
+1. **Clone and Install**:
+
+```bash
+# Clone repository
+git clone https://github.com/carlosapgomes/isoproxy.git
+cd isoproxy
+
+# Create virtual environment and install dependencies
+# With uv (recommended):
+uv venv && uv pip install -e .
+
+# Or with pip:
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -e .
+```
+
+2. **Configuration**:
+
+```bash
+# Copy production config as starting point for development
+cp deployment/config.env.example .env
+
+# Edit .env with your settings
+nano .env
+```
+
+3. **Set API Key**:
+
+```bash
+# Set your API key
+export ANTHROPIC_API_KEY=sk-ant-your-api-key-here
+```
+
+4. **Run Development Server**:
+
+```bash
+# HTTP mode for development/testing (NOT for production)
+uvicorn isoproxy.main:app --reload --host 127.0.0.1 --port 9000
+```
+
+5. **Configure Test Agent**:
+
+```bash
+# Point your coding assistant to the development proxy
+export ANTHROPIC_API_BASE=http://127.0.0.1:9000
+export ANTHROPIC_API_KEY=dummy  # Ignored by proxy
+```
+
+### Optional Defense-in-Depth Measures
+
+The following network filtering configuration is **not required** for isoproxy to function safely. The architecture does not rely on firewall rules for correctness or safety, as endpoint allowlisting is implemented at the application level.
 
 These examples are provided as optional hardening steps that may help with:
 
@@ -503,7 +434,7 @@ These examples are provided as optional hardening steps that may help with:
 
 Users who prefer simpler setups can omit firewall configuration without breaking the proxy functionality.
 
-### Optional Network Egress Filtering
+#### Optional Network Egress Filtering
 
 If you want additional network-level restrictions, you can use the provided nftables configuration:
 
