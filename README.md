@@ -9,7 +9,7 @@ Isoproxy is a safe pass-through proxy server designed specifically for [papercag
 ## Primary Use Case: Papercage Integration
 
 ```
-Agent (in papercage sandbox) --UDS--> Isoproxy (outside) --HTTPS--> Inference Provider
+Agent (in papercage sandbox) <--UDS--> Isoproxy (outside) <--HTTPS--> Inference Provider
 ```
 
 The proxy runs **outside** the sandbox environment and accepts connections from sandboxed agents via Unix domain sockets, providing the only controlled path for API access.
@@ -17,6 +17,7 @@ The proxy runs **outside** the sandbox environment and accepts connections from 
 ## Features
 
 ### Safe Pass-Through Design
+
 - **Strict endpoint allowlisting**: Only connects to configured provider endpoints (no arbitrary URLs)
 - **Protocol preservation**: Forwards unknown fields unchanged for maximum compatibility
 - **Resource boundaries**: Enforces request/response size limits and timeouts
@@ -24,12 +25,14 @@ The proxy runs **outside** the sandbox environment and accepts connections from 
 - **Transparent operation**: No semantic filtering, content rewriting, or "smart" behavior
 
 ### Security Boundaries
+
 - **Minimal attack surface**: Only supports `POST /v1/messages` and `/health`
 - **Fail-closed design**: Strict validation of configuration and resource limits
 - **Metadata-only logging**: Request/response content never logged by default
 - **No arbitrary forwarding**: Rejects all non-allowlisted endpoints
 
 ### Sandboxed Environment Integration
+
 - **Unix domain socket binding**: Default server mode for sandboxed agents
 - **Papercage optimized**: Designed specifically for papercage sandbox integration
 - **Multi-provider support**: Anthropic and other Anthropic-compatible APIs
@@ -61,11 +64,13 @@ pip install -e .
 ### 2. Configuration
 
 Copy the example configuration:
+
 ```bash
 cp .env.example .env
 ```
 
 Edit `.env` with your settings:
+
 ```bash
 # Provider selection (must be in allowlist)
 PROXY_PROVIDER=anthropic
@@ -74,7 +79,7 @@ PROXY_PROVIDER=anthropic
 PROXY_PROVIDERS={
   "anthropic": {
     "endpoint": "https://api.anthropic.com",
-    "api_key_env": "ANTHROPIC_API_KEY"  
+    "api_key_env": "ANTHROPIC_API_KEY"
   }
 }
 
@@ -83,7 +88,7 @@ PROXY_MAX_REQUEST_BYTES=5242880    # 5MB
 PROXY_MAX_RESPONSE_BYTES=20971520  # 20MB
 PROXY_TIMEOUT_SECONDS=120          # 2 minutes
 
-# Server configuration  
+# Server configuration
 PROXY_HOST=127.0.0.1
 PROXY_PORT=9000
 
@@ -92,6 +97,7 @@ PROXY_LOGGING_MODE=metadata
 ```
 
 Set your API keys in separate environment variables:
+
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-your-api-key-here
 # export PROXY_TIMEOUT=60
@@ -107,13 +113,15 @@ cp deployment/.env.example .env
 ### 3. Run the Proxy
 
 **For papercage integration (recommended):**
+
 ```bash
 # Production mode with Unix domain socket (default for sandboxes)
 uvicorn isoproxy.main:app --uds /run/isoproxy/isoproxy.sock --workers 1
 ```
 
 **For development/testing:**
-```bash  
+
+```bash
 # Development mode with HTTP (for testing outside sandbox)
 uvicorn isoproxy.main:app --reload --host 127.0.0.1 --port 9000
 ```
@@ -124,6 +132,7 @@ uvicorn isoproxy.main:app --reload --host 127.0.0.1 --port 9000
 Configure the agent to connect via Unix socket at `/run/isoproxy/isoproxy.sock`
 
 **For development/testing (HTTP):**
+
 ```bash
 export ANTHROPIC_API_BASE=http://127.0.0.1:9000
 export ANTHROPIC_API_KEY=dummy  # Ignored by proxy
@@ -133,35 +142,39 @@ The agent will now use the proxy to access the upstream API through the configur
 
 ## Configuration Reference
 
-| Environment Variable | Required | Default | Description |
-|---------------------|----------|---------|-------------|
-| `PROXY_PROVIDER` | No | `anthropic` | Active provider name (must exist in `PROXY_PROVIDERS`) |
-| `PROXY_PROVIDERS` | No | `{"anthropic": {...}}` | JSON dict of provider configurations |
-| `PROXY_MAX_REQUEST_BYTES` | No | `5242880` | Maximum request size in bytes (5MB) |
-| `PROXY_MAX_RESPONSE_BYTES` | No | `20971520` | Maximum response size in bytes (20MB) |
-| `PROXY_TIMEOUT_SECONDS` | No | `120` | Timeout for upstream requests (1-600 seconds) |
-| `PROXY_HOST` | No | `127.0.0.1` | Host to bind proxy server to |
-| `PROXY_PORT` | No | `9000` | Port to bind proxy server to |
-| `PROXY_LOGGING_MODE` | No | `metadata` | Logging mode: `off`, `metadata`, or `debug` |
-| `ANTHROPIC_API_KEY` | Yes* | - | API key for Anthropic (required if using anthropic provider) |
-*Required depending on which provider is configured.
+| Environment Variable       | Required | Default                | Description                                                  |
+| -------------------------- | -------- | ---------------------- | ------------------------------------------------------------ |
+| `PROXY_PROVIDER`           | No       | `anthropic`            | Active provider name (must exist in `PROXY_PROVIDERS`)       |
+| `PROXY_PROVIDERS`          | No       | `{"anthropic": {...}}` | JSON dict of provider configurations                         |
+| `PROXY_MAX_REQUEST_BYTES`  | No       | `5242880`              | Maximum request size in bytes (5MB)                          |
+| `PROXY_MAX_RESPONSE_BYTES` | No       | `20971520`             | Maximum response size in bytes (20MB)                        |
+| `PROXY_TIMEOUT_SECONDS`    | No       | `120`                  | Timeout for upstream requests (1-600 seconds)                |
+| `PROXY_HOST`               | No       | `127.0.0.1`            | Host to bind proxy server to                                 |
+| `PROXY_PORT`               | No       | `9000`                 | Port to bind proxy server to                                 |
+| `PROXY_LOGGING_MODE`       | No       | `metadata`             | Logging mode: `off`, `metadata`, or `debug`                  |
+| `ANTHROPIC_API_KEY`        | Yes\*    | -                      | API key for Anthropic (required if using anthropic provider) |
+
+\*Required depending on which provider is configured.
 
 ## Provider Compatibility
 
 **IMPORTANT**: Isoproxy is designed specifically for **Claude Code**, which is the only LLM coding assistant that uses Anthropic's API protocol. On the server side, isoproxy works with **Anthropic-compatible** API endpoints that use the Anthropic protocol format. This includes:
 
 ✅ **Compatible providers:**
+
 - Anthropic (api.anthropic.com) - native support
-- Z.ai GLM-4.7 - offers Anthropic-compatible endpoints  
+- Z.ai GLM-4.7 - offers Anthropic-compatible endpoints
 - Moonshot Kimi K2 - offers Anthropic-compatible endpoints
 - Other inference providers that offer Anthropic-compatible APIs
 
 ❌ **Incompatible providers:**
+
 - OpenRouter - only offers OpenAI-compatible endpoints, not Anthropic-compatible
 - OpenAI API directly - uses OpenAI protocol format
 - Most inference providers that only support OpenAI-compatible formats
 
 **Client Compatibility:**
+
 - ✅ **Claude Code** - designed specifically for this use case
 - ❌ **Other LLM coding assistants** (Cursor, Continue, Aider, etc.) - these use OpenAI-compatible protocols
 
@@ -243,28 +256,12 @@ sudo systemctl status isoproxy
 sudo journalctl -u isoproxy -f
 ```
 
-7. (Optional) Configure network restrictions:
-
-```bash
-# Get isoproxy user ID
-id -u isoproxy
-
-# Edit the config and update LLMPROXY_UID with the actual UID
-sudo nano deployment/nftables-llmproxy.conf
-
-# Deploy the nftables rules
-sudo mkdir -p /etc/nftables.d
-sudo cp deployment/nftables-llmproxy.conf /etc/nftables.d/llmproxy.conf
-echo 'include "/etc/nftables.d/llmproxy.conf"' | sudo tee -a /etc/nftables.conf
-sudo nft -f /etc/nftables.conf
-```
-
 ## Unix Socket Configuration (Recommended)
 
 Isoproxy is designed primarily for Unix domain sockets when working with sandboxed environments like papercage. This provides:
 
 - **Filesystem-level access control**: Socket permissions control access
-- **Reduced attack surface**: No network exposure, even locally  
+- **Reduced attack surface**: No network exposure, even locally
 - **Sandbox integration**: Perfect for papercage and other containerized environments
 - **High performance**: Lower overhead than TCP sockets
 
@@ -287,12 +284,14 @@ sudo -u isoproxy \
 ### Configure Papercage Access
 
 When using with papercage, configure the sandbox to route API calls through the Unix socket:
+
 ```bash
 # Inside papercage sandbox configuration
 export ANTHROPIC_API_SOCKET=/run/isoproxy/isoproxy.sock
 ```
 
 For testing with curl:
+
 ```bash
 curl --unix-socket /run/isoproxy/isoproxy.sock \
      -X POST \
@@ -306,6 +305,7 @@ curl --unix-socket /run/isoproxy/isoproxy.sock \
 Use with nginx, Apache, or other HTTP proxies:
 
 **nginx example:**
+
 ```nginx
 upstream isoproxy {
     server unix:/run/isoproxy/isoproxy.sock;
@@ -313,7 +313,7 @@ upstream isoproxy {
 
 server {
     listen 127.0.0.1:9000;
-    
+
     location /v1/messages {
         proxy_pass http://isoproxy;
         proxy_set_header Host $host;
@@ -346,8 +346,9 @@ The socket will be available at `/run/isoproxy/isoproxy.sock` with proper permis
 > **IMPORTANT**: This proxy does not attempt to make model output safe.
 
 The proxy explicitly does **not**:
+
 - ❌ Detect prompt injection
-- ❌ Detect malicious code generation  
+- ❌ Detect malicious code generation
 - ❌ Prevent unsafe suggestions
 - ❌ Filter tool instructions
 - ❌ Validate semantic correctness
@@ -358,8 +359,9 @@ The proxy explicitly does **not**:
 - ❌ Provide content filtering or safety guarantees
 
 Safety in this architecture comes from:
+
 1. **Sandboxing**: Runtime isolation of agent execution
-2. **Filesystem isolation**: Controlled access to files and directories  
+2. **Filesystem isolation**: Controlled access to files and directories
 3. **Human review**: Explicit review processes for changes
 4. **Version control**: All changes tracked and reviewable
 5. **Workflow constraints**: Controlled deployment and execution pipelines
@@ -381,11 +383,7 @@ Safety in this architecture comes from:
   - `SystemCallFilter` limits available syscalls to service essentials
   - `RestrictAddressFamilies` limits network access to IPv4/IPv6
   - Resource limits (`CPUQuota`, `MemoryMax`) prevent resource exhaustion
-- **Network egress filtering**: Optional nftables configuration (`deployment/nftables-llmproxy.conf`) restricts outbound connections:
-  - User-scoped filtering (only affects `llmproxy` user)
-  - Allows only loopback, DNS, and HTTPS
-  - Logs all blocked connection attempts for monitoring
-  - Prevents exfiltration via HTTP, FTP, SSH, or other protocols
+- **Protocol allowlisting**: Application-level endpoint validation ensures connections only to configured providers
 - **API key isolation**: API keys are loaded from a secure config file (`/etc/isoproxy/config.env`) with 600 permissions, never exposed in process environment or systemd metadata
 - **Unix socket support**: Can bind to Unix domain sockets for integration with other services or additional security isolation
 - **Segregated execution**: Designed to run as a dedicated unprivileged user outside sandboxed environments
@@ -455,7 +453,7 @@ isoproxy/
 ├── src/isoproxy/
 │   ├── __init__.py       # Package metadata
 │   ├── main.py           # FastAPI application (safe pass-through)
-│   ├── config.py         # Configuration management  
+│   ├── config.py         # Configuration management
 │   ├── models.py         # Minimal models (error types only)
 │   ├── proxy.py          # Safe forwarding logic
 │   └── errors.py         # Error handling
@@ -471,8 +469,9 @@ isoproxy/
 This proxy is intentionally minimal and follows the safe pass-through design. Before adding features, consider if they align with the design principles documented in `docs/safe-pass-through-design.md`.
 
 The proxy should remain:
+
 - Boring and predictable
-- Transparent (no semantic filtering)  
+- Transparent (no semantic filtering)
 - Hard to misuse by accident
 - Focused on transport, limits, credentials, and protocol fidelity
 
@@ -483,8 +482,51 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ## Attribution
 
 This project was developed with AI assistance:
+
 - Initial specification (`specs.md`) was written by ChatGPT (OpenAI)
 - Implementation, architecture, test suite, and documentation were generated by Claude Code (Anthropic)
+
+## Appendix: Optional Defense-in-Depth Measures
+
+The following configuration is **not required** for isoproxy to function safely. The architecture does not rely on firewall rules for correctness or safety, as endpoint allowlisting is implemented at the application level.
+
+These examples are provided as optional hardening steps that may help with:
+
+- **Limiting blast radius** of potential proxy bugs (misconfigured redirects, dynamic URL handling)
+- **Reducing impact** of accidental misconfiguration or typos
+- **Additional guardrails** during development and experimentation
+
+Users who prefer simpler setups can omit firewall configuration without breaking the proxy functionality.
+
+### Optional Network Egress Filtering
+
+If you want additional network-level restrictions, you can use the provided nftables configuration:
+
+```bash
+# Get isoproxy user ID
+id -u isoproxy
+
+# Edit the config and update ISOPROXY_UID with the actual UID
+sudo nano deployment/nftables-isoproxy.conf
+
+# Deploy the nftables rules
+sudo mkdir -p /etc/nftables.d
+sudo cp deployment/nftables-isoproxy.conf /etc/nftables.d/isoproxy.conf
+echo 'include "/etc/nftables.d/isoproxy.conf"' | sudo tee -a /etc/nftables.conf
+sudo nft -f /etc/nftables.conf
+
+# Verify rules are active
+sudo nft list ruleset | grep isoproxy
+
+# Monitor blocked attempts (optional)
+sudo journalctl -kf | grep isoproxy-blocked
+```
+
+This configuration:
+
+- Restricts the `isoproxy` user to DNS and HTTPS traffic only
+- Logs blocked connection attempts for monitoring
+- Does not affect other users on the system
 
 ## Contributing
 

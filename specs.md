@@ -16,7 +16,7 @@ Provide a **local HTTP proxy** that implements the **minimum subset** of the Ant
 
 * Long-running HTTP server
 * Runs **outside** the sandbox
-* Runs as **unprivileged UNIX user** (e.g. `llmproxy`)
+* Runs as **unprivileged UNIX user** (e.g. `isoproxy`)
 * Single process, no workers
 
 ---

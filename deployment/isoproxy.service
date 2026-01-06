@@ -44,7 +44,7 @@ MemoryDenyWriteExecute=true
 
 # Network restrictions
 # Note: This allows IPv4/IPv6 but does NOT restrict destinations.
-# Use nftables/iptables to restrict outbound connections for user llmproxy.
+# Application-level endpoint allowlisting provides connection control.
 RestrictAddressFamilies=AF_INET AF_INET6
 
 # System call filtering
